@@ -18,8 +18,7 @@ class BackendSyncService {
   final DentalRepository repository;
   final http.Client _client;
 
-  /// Update this once the backend is deployed (see backend/README.md step 3).
-  static const String baseUrl = 'https://stom-backend.onrender.com';
+  static const String baseUrl = 'https://stomatology-app.onrender.com';
 
   Future<bool> pushAll() async {
     try {
