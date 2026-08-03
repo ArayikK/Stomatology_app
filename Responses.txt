@@ -1,0 +1,184 @@
+STOM - COMPETITIVE LANDSCAPE & FEATURE IDEAS
+=============================================
+
+
+1) SIMILAR APPS / DENTAL CHARTING SOFTWARE
+-------------------------------------------
+These are the established players in dental practice management and
+odontogram (tooth-chart) software - useful references for UX and feature
+ideas:
+
+- Curve Dental (Curve Hero / Curve Core)
+  Cloud-based practice management suite with a strong odontogram/charting
+  module, imaging, scheduling and billing all in one place. Probably the
+  closest match to what "Stom" is becoming.
+
+- Dentrix (Henry Schein)
+  One of the most widely used desktop practice management systems in the
+  US. Deep charting, treatment planning, and insurance/billing tools.
+
+- Eaglesoft (Patterson Dental)
+  Similar market position to Dentrix - charting, imaging, scheduling,
+  billing, all tightly integrated.
+
+- Open Dental
+  Open-source practice management software. Good reference because the
+  source is publicly readable - useful if you want to see how they model
+  tooth surfaces, procedures, and perio charting in a real schema.
+
+- Denticon (Planet DDS)
+  Cloud-based, popular with multi-location dental service organizations
+  (DSOs); strong reporting/analytics on top of charting.
+
+- Carestream Dental (CS SoftDent / CS OrthoTrac)
+  Strong on the imaging side (X-ray/DICOM integration) paired with
+  charting and practice management.
+
+- iDentalSoft / MOGO / tab32 / SolutionReach / Weave
+  Smaller / newer cloud competitors, several lean heavily on patient
+  communication (reminders, texting, online booking) as a differentiator
+  rather than charting depth.
+
+- Google/Apple Health-adjacent consumer apps (e.g. "Toothie", various
+  home tooth-tracking apps)
+  Not real practice-management tools, but worth a glance for simple,
+  friendly odontogram visuals aimed at patients rather than clinicians.
+
+Positioning note: most of the big names above are full practice-management
+suites (scheduling + billing + insurance + charting). Stom is currently a
+focused charting/notes/x-ray tool, which is closer to a lightweight,
+single-clinician alternative - that focus can be a strength if the goal is
+"do charting really well" rather than "replace Dentrix."
+
+
+2) FEATURE IDEAS FOR STOM
+--------------------------
+
+Charting depth
+- Tooth-surface-level charting (mesial / distal / occlusal / buccal /
+  lingual) instead of one note bucket per whole tooth - this is the
+  standard clinical model and would make notes much more precise.
+- A proper status/legend per tooth beyond "has history": missing, crown,
+  filling, root canal, implant, extraction planned, watch. Each with its
+  own color, shown as a small legend under the chart.
+- Perio charting (probing depths, gum recession, bleeding on probing) as
+  a second view alongside the odontogram - standard in every competitor
+  listed above.
+- Quick-pick procedure list (common treatments, ideally mapped to CDT
+  procedure codes) instead of always typing free-text notes, with the
+  option to still add a free-text note on top.
+
+Patient record depth
+- Treatment history timeline per patient (chronological feed across all
+  teeth, not just per-tooth).
+- Medical history / allergies / medications section per patient - important
+  before doing any real clinical work.
+- Search and filter on the patient list (by name, by "has open issues",
+  by last visit date).
+- Family/relationship linking between patient records.
+
+Imaging
+- Support DICOM (the real radiograph format), not just JPEG/PNG - or at
+  minimum, image annotation/measurement tools on top of the current
+  upload/view flow.
+- Before/after image pairs per tooth.
+
+Scheduling & communication
+- Appointment calendar with reminders (this is the single biggest feature
+  gap vs. every competitor above).
+- SMS/email reminders and recall notifications ("due for checkup").
+
+Data safety & access
+- Cloud sync/backup - right now data lives only in a local SQLite file,
+  so losing the device loses all patient records. This is the highest-risk
+  gap for a real clinical tool.
+- Multi-user accounts with roles (dentist / hygienist / front desk) and
+  basic access control.
+- Encryption at rest and an audit log (who viewed/edited what, when) -
+  expected for handling real patient health data.
+- Export a patient's chart/notes to PDF (for referrals, insurance, or
+  patient handouts).
+
+Day-to-day usability
+- Voice-to-text note dictation for hands-free charting chairside.
+- Undo/redo and note edit history (see what a note used to say).
+- Tablet/stylus-optimized layout for chairside use during procedures.
+- Dark mode.
+
+Business side (bigger scope, only if Stom grows toward full practice
+management)
+- Billing/invoicing and insurance claim tracking.
+- Basic reporting (procedures done per month, revenue per patient, etc.)
+
+Suggested near-term priorities (highest impact, lowest effort first):
+1. Cloud sync/backup - protects against data loss, the most serious risk
+   right now.
+2. Tooth-surface-level charting - meaningfully upgrades clinical accuracy
+   without a huge UI overhaul.
+3. Quick-pick procedure list w/ status legend - makes charting faster and
+   the highlighted teeth more informative than a single blue on/off state.
+4. Patient search/filter + medical history section - small effort, real
+   day-to-day value.
+5. Appointment scheduling - biggest feature gap vs. competitors, but also
+   the biggest scope increase, so worth sequencing after the above.
+
+
+________________
+
+
+3) THINGS YOU MUST DO, STEP BY STEP
+-------------------------------------
+Everything below is manual - things only you can do (accounts, credentials,
+deployment). The code and docs referenced already exist in the project.
+
+1. Create your MongoDB Atlas cluster.
+   Full click-by-click steps are in backend/README.md, section 1. Short
+   version: log into cloud.mongodb.com -> "Build a Database" -> M0 Free
+   tier -> create a database user (username + password) -> Network Access
+   -> "Add My Current IP Address" for now -> copy the connection string.
+
+2. Run the backend locally and test it.
+   backend/README.md, section 2:
+     cd backend
+     npm install
+     copy .env.example .env      (then paste your real connection string
+                                   into MONGODB_URI inside .env)
+     npm start
+   Confirm you see "Connected to MongoDB" and "Stom backend listening on
+   port 3000", then test with the curl commands in that section.
+
+3. Deploy the backend so it has a real public URL.
+   backend/README.md, section 3: push the project to GitHub, create a
+   free Web Service on render.com pointed at the backend folder, add the
+   MONGODB_URI environment variable there too, and in Atlas -> Network
+   Access add 0.0.0.0/0 (allow from anywhere) since Render's free tier
+   doesn't use a fixed IP. Render will give you a URL like
+   https://stom-backend.onrender.com.
+
+4. Point the app at your real backend URL.
+   Open lib/data/backend_sync_service.dart and replace the placeholder
+   value of kBackendBaseUrl with the real Render URL from step 3. (Or send
+   me the URL and I'll do it.)
+
+5. Rebuild the APK and test sync end to end.
+   flutter build apk --debug (or --release when ready), install it,
+   add/edit a patient or note, then use the overflow menu's "Sync now" to
+   confirm it succeeds, and "Device identifier" to see the id being used.
+
+6. Get the Privacy Policy and Terms & Conditions reviewed by a lawyer.
+   The text in lib/legal/legal_content.dart is complete and specific to
+   how the app works, but it handles patient health information, so it
+   should be checked against whatever laws apply to you and your patients
+   (e.g. HIPAA, GDPR, or local equivalents) before you rely on it for real
+   patients.
+
+7. Fill in the placeholders that only you can decide.
+   - Terms & Conditions -> "Governing Law" section currently says the
+     jurisdiction should be finalized once there's a formal publisher of
+     record - put your actual business/jurisdiction there.
+   - Privacy Policy / Terms / FAQ -> "contact the developer at the support
+     address provided with your copy of the App" - decide on and add a
+     real support email address in these documents.
+
+8. Decide on and communicate pricing/licensing (referenced in the FAQ but
+   intentionally left for you to define outside the app).
