@@ -147,11 +147,16 @@ class _ToothDetailSheetState extends State<ToothDetailSheet> {
       withData: true,
     );
     final picked = result?.files.single;
-    if (picked?.bytes == null) return;
+    if (picked == null) return; // user cancelled the picker
+
+    if (picked.bytes == null) {
+      await _showDicomError('Could not read the selected file.');
+      return;
+    }
 
     setState(() => _busy = true);
     try {
-      final dataset = const DicomParser().parse(picked!.bytes!);
+      final dataset = const DicomParser().parse(picked.bytes!);
       final rendered = await const DicomImageConverter().convert(dataset);
 
       final docsDir = await getApplicationDocumentsDirectory();
@@ -175,12 +180,32 @@ class _ToothDetailSheetState extends State<ToothDetailSheet> {
       await _load();
       unawaited(widget.syncService.pushAll());
     } on DicomParseException catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
-      }
+      await _showDicomError(e.message);
+    } catch (e) {
+      await _showDicomError('Could not import this DICOM file: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Bottom sheets can visually swallow SnackBars (they render behind the
+  /// still-open sheet), so DICOM import errors use a dialog instead - it's
+  /// impossible to miss.
+  Future<void> _showDicomError(String message) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Couldn\'t import this file'),
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _viewImage(ToothImage image) {
