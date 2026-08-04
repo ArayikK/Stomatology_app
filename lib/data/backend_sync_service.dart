@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../models/annotation_shape.dart';
 import '../models/note_category.dart';
 import 'dental_repository.dart';
 import 'device_identity.dart';
@@ -70,6 +71,7 @@ class BackendSyncService {
             'fileName': p.basename(image.filePath),
             'createdAt': image.createdAt.toIso8601String(),
             'base64': base64Encode(await file.readAsBytes()),
+            'annotationsJson': image.annotationsJson,
           });
         }
 
@@ -153,7 +155,14 @@ class BackendSyncService {
               'p${patient.id}_t${toothNumber}_${DateTime.now().microsecondsSinceEpoch}_$originalName';
           final filePath = p.join(xraysDir.path, fileName);
           await File(filePath).writeAsBytes(base64Decode(base64Data));
-          await repository.addImage(patient.id!, toothNumber, filePath);
+          final restoredImage = await repository.addImage(patient.id!, toothNumber, filePath);
+          final annotationsJson = imageMap['annotationsJson'] as String?;
+          if (annotationsJson != null && annotationsJson.trim().isNotEmpty) {
+            await repository.updateImageAnnotations(
+              restoredImage.id!,
+              decodeAnnotations(annotationsJson),
+            );
+          }
         }
       }
       restoredCount++;

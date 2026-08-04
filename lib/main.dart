@@ -32,6 +32,13 @@ class StomApp extends StatelessWidget {
     return MaterialApp(
       title: 'Stom',
       theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal)),
+      darkTheme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: Colors.teal,
+          brightness: Brightness.dark,
+        ),
+      ),
+      themeMode: ThemeMode.system,
       home: PatientListScreen(repository: repository, syncService: syncService),
     );
   }

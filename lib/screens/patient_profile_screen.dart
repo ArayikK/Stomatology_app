@@ -1,10 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../data/backend_sync_service.dart';
 import '../data/dental_repository.dart';
 import '../models/note_category.dart';
 import '../models/patient.dart';
+import '../models/patient_relationship.dart';
+import '../models/relationship_type.dart';
 import '../models/tooth_note.dart';
+import 'patient_chart_screen.dart';
 import 'tooth_detail_screen.dart';
 
 /// Patient-level info that doesn't belong to any single tooth: medical
@@ -38,7 +43,7 @@ class _PatientProfileScreenState extends State<PatientProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 2,
+      length: 3,
       child: Scaffold(
         appBar: AppBar(
           title: Text(_patient.fullName),
@@ -46,6 +51,7 @@ class _PatientProfileScreenState extends State<PatientProfileScreen> {
             tabs: [
               Tab(text: 'Medical History'),
               Tab(text: 'Treatment Timeline'),
+              Tab(text: 'Family'),
             ],
           ),
         ),
@@ -57,6 +63,11 @@ class _PatientProfileScreenState extends State<PatientProfileScreen> {
               onSaved: (updated) => setState(() => _patient = updated),
             ),
             _TreatmentTimelineTab(
+              repository: widget.repository,
+              syncService: widget.syncService,
+              patient: _patient,
+            ),
+            _FamilyTab(
               repository: widget.repository,
               syncService: widget.syncService,
               patient: _patient,
@@ -378,6 +389,163 @@ class _CategoryChip extends StatelessWidget {
       child: Text(
         category.label,
         style: TextStyle(color: category.color, fontSize: 11, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+}
+
+class _FamilyTab extends StatefulWidget {
+  const _FamilyTab({
+    required this.repository,
+    required this.syncService,
+    required this.patient,
+  });
+
+  final DentalRepository repository;
+  final BackendSyncService syncService;
+  final Patient patient;
+
+  @override
+  State<_FamilyTab> createState() => _FamilyTabState();
+}
+
+class _FamilyTabState extends State<_FamilyTab> {
+  late Future<List<PatientRelationship>> _relationshipsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  void _load() {
+    _relationshipsFuture = widget.repository.getRelationships(widget.patient.id!);
+  }
+
+  Future<void> _addRelationship() async {
+    final allPatients = await widget.repository.getPatients();
+    final existing = await widget.repository.getRelationships(widget.patient.id!);
+    final linkedIds = existing.map((r) => r.relatedPatient.id).toSet();
+    final candidates = allPatients
+        .where((p) => p.id != widget.patient.id && !linkedIds.contains(p.id))
+        .toList();
+
+    if (candidates.isEmpty) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('No patients to link'),
+          content: const Text(
+            'Every other patient is already linked, or there are no other patients yet.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    final relatedPatient = await showDialog<Patient>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Link which patient?'),
+        children: [
+          for (final candidate in candidates)
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(context).pop(candidate),
+              child: Text(candidate.fullName),
+            ),
+        ],
+      ),
+    );
+    if (relatedPatient == null || !mounted) return;
+
+    final type = await showDialog<RelationshipType>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: Text('How is ${widget.patient.firstName} related to ${relatedPatient.firstName}?'),
+        children: [
+          for (final option in RelationshipType.values)
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(context).pop(option),
+              child: Text(option.label),
+            ),
+        ],
+      ),
+    );
+    if (type == null) return;
+
+    await widget.repository.linkPatients(widget.patient.id!, relatedPatient.id!, type);
+    setState(_load);
+    unawaited(widget.syncService.pushAll());
+  }
+
+  Future<void> _unlink(PatientRelationship relationship) async {
+    await widget.repository.unlinkPatients(widget.patient.id!, relationship.relatedPatient.id!);
+    setState(_load);
+    unawaited(widget.syncService.pushAll());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: FutureBuilder<List<PatientRelationship>>(
+        future: _relationshipsFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final relationships = snapshot.data ?? const [];
+          if (relationships.isEmpty) {
+            return const Center(child: Text('No family/relationship links yet.'));
+          }
+          return ListView.separated(
+            padding: const EdgeInsets.all(16),
+            itemCount: relationships.length,
+            separatorBuilder: (context, index) => const Divider(height: 1),
+            itemBuilder: (context, index) {
+              final relationship = relationships[index];
+              return ListTile(
+                leading: CircleAvatar(
+                  child: Text(
+                    relationship.relatedPatient.firstName.isNotEmpty
+                        ? relationship.relatedPatient.firstName[0]
+                        : '?',
+                  ),
+                ),
+                title: Text(relationship.relatedPatient.fullName),
+                subtitle: Text(relationship.type.label),
+                trailing: IconButton(
+                  icon: const Icon(Icons.link_off),
+                  tooltip: 'Unlink',
+                  onPressed: () => _unlink(relationship),
+                ),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => PatientChartScreen(
+                        repository: widget.repository,
+                        syncService: widget.syncService,
+                        patient: relationship.relatedPatient,
+                      ),
+                    ),
+                  );
+                },
+              );
+            },
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _addRelationship,
+        icon: const Icon(Icons.person_add_alt_1),
+        label: const Text('Link patient'),
       ),
     );
   }

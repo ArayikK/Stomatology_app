@@ -55,12 +55,25 @@ class AppDatabase {
           )
         ''');
         await db.execute('''
+          CREATE TABLE tooth_note_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            note_id INTEGER NOT NULL,
+            text TEXT NOT NULL,
+            category TEXT,
+            edited_at TEXT NOT NULL,
+            FOREIGN KEY (note_id) REFERENCES tooth_notes (id) ON DELETE CASCADE
+          )
+        ''');
+        await db.execute('''
           CREATE TABLE tooth_images (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             patient_id INTEGER NOT NULL,
             tooth_number INTEGER NOT NULL,
             file_path TEXT NOT NULL,
             original_dicom_path TEXT,
+            role TEXT,
+            paired_image_id INTEGER,
+            annotations_json TEXT,
             created_at TEXT NOT NULL,
             FOREIGN KEY (patient_id) REFERENCES patients (id) ON DELETE CASCADE
           )
@@ -70,6 +83,37 @@ class AppDatabase {
         );
         await db.execute(
           'CREATE INDEX idx_images_patient_tooth ON tooth_images (patient_id, tooth_number)',
+        );
+        await db.execute(
+          'CREATE INDEX idx_note_history_note ON tooth_note_history (note_id)',
+        );
+        await db.execute('''
+          CREATE TABLE patient_relationships (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id INTEGER NOT NULL,
+            related_patient_id INTEGER NOT NULL,
+            relationship_type TEXT NOT NULL,
+            FOREIGN KEY (patient_id) REFERENCES patients (id) ON DELETE CASCADE,
+            FOREIGN KEY (related_patient_id) REFERENCES patients (id) ON DELETE CASCADE
+          )
+        ''');
+        await db.execute(
+          'CREATE INDEX idx_relationships_patient ON patient_relationships (patient_id)',
+        );
+        await db.execute('''
+          CREATE TABLE appointments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id INTEGER NOT NULL,
+            date_time TEXT NOT NULL,
+            duration_minutes INTEGER NOT NULL,
+            notes TEXT NOT NULL,
+            reminder_minutes_before INTEGER,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (patient_id) REFERENCES patients (id) ON DELETE CASCADE
+          )
+        ''');
+        await db.execute(
+          'CREATE INDEX idx_appointments_date ON appointments (date_time)',
         );
       },
       onConfigure: (db) async {
