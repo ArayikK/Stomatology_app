@@ -11,9 +11,9 @@ class DicomParseException implements Exception {
 }
 
 /// The handful of pixel-data compression schemes this parser understands.
-/// Everything else (JPEG Lossless, JPEG 2000, RLE, deflated syntaxes, ...)
-/// is reported as unsupported rather than guessed at.
-enum DicomCompression { native, jpegBaseline }
+/// Everything else (JPEG 2000, RLE, deflated syntaxes, ...) is reported as
+/// unsupported rather than guessed at.
+enum DicomCompression { native, jpegBaseline, jpegLossless }
 
 class DicomPixelInfo {
   const DicomPixelInfo({
@@ -137,8 +137,8 @@ class DicomParser {
     if (compression == null) {
       throw DicomParseException(
         'This DICOM file uses a compression format ("$transferSyntaxUid") '
-        'that isn\'t supported yet. Uncompressed and JPEG-compressed DICOM '
-        'images are supported.',
+        'that isn\'t supported yet. Uncompressed, JPEG Baseline, and JPEG '
+        'Lossless DICOM images are supported.',
       );
     }
     final bigEndian = transferSyntaxUid == '1.2.840.10008.1.2.2';
@@ -381,6 +381,9 @@ DicomCompression? _compressionForTransferSyntax(String uid) {
     case '1.2.840.10008.1.2.4.50':
     case '1.2.840.10008.1.2.4.51':
       return DicomCompression.jpegBaseline;
+    case '1.2.840.10008.1.2.4.57':
+    case '1.2.840.10008.1.2.4.70':
+      return DicomCompression.jpegLossless;
     default:
       return null;
   }

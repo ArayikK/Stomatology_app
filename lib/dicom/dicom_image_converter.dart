@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'dicom_parser.dart';
+import 'jpeg_lossless_decoder.dart';
 
 /// Bytes ready to write to disk and display with Image.file/Image.memory.
 class DicomRenderResult {
@@ -26,13 +27,56 @@ class DicomImageConverter {
       return DicomRenderResult(bytes: dataset.pixelBytes, extension: 'jpg');
     }
 
-    final rgba = _toRgba(dataset);
-    final image = await _decodeRgba(rgba, dataset.info.columns, dataset.info.rows);
+    final effectiveDataset = dataset.compression == DicomCompression.jpegLossless
+        ? _decodeJpegLossless(dataset)
+        : dataset;
+
+    final rgba = _toRgba(effectiveDataset);
+    final image = await _decodeRgba(rgba, effectiveDataset.info.columns, effectiveDataset.info.rows);
     final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
     if (byteData == null) {
       throw const DicomParseException('Could not render this DICOM image.');
     }
     return DicomRenderResult(bytes: byteData.buffer.asUint8List(), extension: 'png');
+  }
+
+  /// Decodes the JPEG Lossless codestream to raw samples, then repackages
+  /// them as a synthetic "native" pixel buffer so the existing
+  /// windowing/grayscale pipeline in [_toRgba] can be reused unchanged.
+  DicomDataset _decodeJpegLossless(DicomDataset dataset) {
+    final result = const JpegLosslessDecoder().decode(dataset.pixelBytes);
+    final bytesPerSample = result.precision <= 8 ? 1 : 2;
+    final packed = Uint8List(result.samples.length * bytesPerSample);
+    final packedData = ByteData.sublistView(packed);
+    for (var i = 0; i < result.samples.length; i++) {
+      if (bytesPerSample == 1) {
+        packedData.setUint8(i, result.samples[i]);
+      } else {
+        packedData.setUint16(i * 2, result.samples[i], Endian.little);
+      }
+    }
+
+    final originalInfo = dataset.info;
+    final effectiveInfo = DicomPixelInfo(
+      rows: result.height,
+      columns: result.width,
+      bitsAllocated: bytesPerSample * 8,
+      samplesPerPixel: result.componentCount,
+      photometricInterpretation: originalInfo.photometricInterpretation,
+      pixelRepresentationSigned: false, // JPEG Lossless sample values are unsigned
+      planarConfiguration: 0, // decoder already interleaves samples by component
+      windowCenter: originalInfo.windowCenter,
+      windowWidth: originalInfo.windowWidth,
+      rescaleIntercept: originalInfo.rescaleIntercept,
+      rescaleSlope: originalInfo.rescaleSlope,
+    );
+
+    return DicomDataset(
+      info: effectiveInfo,
+      pixelBytes: packed,
+      compression: DicomCompression.native,
+      bigEndian: false,
+    );
   }
 
   Future<ui.Image> _decodeRgba(Uint8List rgba, int width, int height) {
