@@ -3,6 +3,11 @@ class ToothImage {
   final int patientId;
   final int toothNumber;
   final String filePath;
+
+  /// Present when this image was imported from a DICOM (.dcm) file - the
+  /// original file, preserved alongside the flattened PNG/JPEG at
+  /// [filePath] that the app actually displays.
+  final String? originalDicomPath;
   final DateTime createdAt;
 
   const ToothImage({
@@ -10,6 +15,7 @@ class ToothImage {
     required this.patientId,
     required this.toothNumber,
     required this.filePath,
+    this.originalDicomPath,
     required this.createdAt,
   });
 
@@ -19,6 +25,7 @@ class ToothImage {
       'patient_id': patientId,
       'tooth_number': toothNumber,
       'file_path': filePath,
+      'original_dicom_path': originalDicomPath,
       'created_at': createdAt.toIso8601String(),
     };
   }
@@ -29,6 +36,7 @@ class ToothImage {
       patientId: map['patient_id'] as int,
       toothNumber: map['tooth_number'] as int,
       filePath: map['file_path'] as String,
+      originalDicomPath: map['original_dicom_path'] as String?,
       createdAt: DateTime.parse(map['created_at'] as String),
     );
   }

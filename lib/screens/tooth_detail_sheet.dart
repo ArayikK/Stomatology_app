@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as p;
@@ -8,6 +9,8 @@ import 'package:path_provider/path_provider.dart';
 
 import '../data/backend_sync_service.dart';
 import '../data/dental_repository.dart';
+import '../dicom/dicom_image_converter.dart';
+import '../dicom/dicom_parser.dart';
 import '../models/tooth_image.dart';
 import '../models/tooth_note.dart';
 
@@ -137,6 +140,49 @@ class _ToothDetailSheetState extends State<ToothDetailSheet> {
     unawaited(widget.syncService.pushAll());
   }
 
+  Future<void> _pickDicomFile() async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['dcm'],
+      withData: true,
+    );
+    final picked = result?.files.single;
+    if (picked?.bytes == null) return;
+
+    setState(() => _busy = true);
+    try {
+      final dataset = const DicomParser().parse(picked!.bytes!);
+      final rendered = await const DicomImageConverter().convert(dataset);
+
+      final docsDir = await getApplicationDocumentsDirectory();
+      final xraysDir = Directory(p.join(docsDir.path, 'xrays'));
+      if (!await xraysDir.exists()) {
+        await xraysDir.create(recursive: true);
+      }
+      final stamp = DateTime.now().millisecondsSinceEpoch;
+      final baseName = 'p${widget.patientId}_t${widget.toothNumber}_$stamp';
+      final displayPath = p.join(xraysDir.path, '$baseName.${rendered.extension}');
+      final originalPath = p.join(xraysDir.path, '$baseName.dcm');
+      await File(displayPath).writeAsBytes(rendered.bytes);
+      await File(originalPath).writeAsBytes(picked.bytes!);
+
+      await widget.repository.addImage(
+        widget.patientId,
+        widget.toothNumber,
+        displayPath,
+        originalDicomPath: originalPath,
+      );
+      await _load();
+      unawaited(widget.syncService.pushAll());
+    } on DicomParseException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   void _viewImage(ToothImage image) {
     showDialog<void>(
       context: context,
@@ -148,6 +194,22 @@ class _ToothDetailSheetState extends State<ToothDetailSheet> {
               InteractiveViewer(
                 child: Image.file(File(image.filePath), fit: BoxFit.contain),
               ),
+              if (image.originalDicomPath != null)
+                Positioned(
+                  left: 4,
+                  top: 4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.black87,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text(
+                      'Imported from DICOM',
+                      style: TextStyle(color: Colors.white, fontSize: 11),
+                    ),
+                  ),
+                ),
               Positioned(
                 top: 4,
                 right: 4,
@@ -220,14 +282,37 @@ class _ToothDetailSheetState extends State<ToothDetailSheet> {
                         child: GestureDetector(
                           onTap: () => _viewImage(image),
                           onLongPress: () => _deleteImage(image),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.file(
-                              File(image.filePath),
-                              width: 96,
-                              height: 96,
-                              fit: BoxFit.cover,
-                            ),
+                          child: Stack(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: Image.file(
+                                  File(image.filePath),
+                                  width: 96,
+                                  height: 96,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                              if (image.originalDicomPath != null)
+                                Positioned(
+                                  left: 4,
+                                  bottom: 4,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 4,
+                                      vertical: 1,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black87,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: const Text(
+                                      'DICOM',
+                                      style: TextStyle(color: Colors.white, fontSize: 9),
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
                       ),
@@ -235,6 +320,7 @@ class _ToothDetailSheetState extends State<ToothDetailSheet> {
                       busy: _busy,
                       onPickGallery: () => _pickImage(ImageSource.gallery),
                       onPickCamera: () => _pickImage(ImageSource.camera),
+                      onPickDicom: _pickDicomFile,
                     ),
                   ],
                 ),
@@ -297,16 +383,20 @@ class _ToothDetailSheetState extends State<ToothDetailSheet> {
   }
 }
 
+enum _ImageSourceChoice { gallery, camera, dicom }
+
 class _AddImageButton extends StatelessWidget {
   const _AddImageButton({
     required this.busy,
     required this.onPickGallery,
     required this.onPickCamera,
+    required this.onPickDicom,
   });
 
   final bool busy;
   final VoidCallback onPickGallery;
   final VoidCallback onPickCamera;
+  final VoidCallback onPickDicom;
 
   @override
   Widget build(BuildContext context) {
@@ -317,7 +407,7 @@ class _AddImageButton extends StatelessWidget {
         onPressed: busy
             ? null
             : () async {
-                final source = await showModalBottomSheet<ImageSource>(
+                final source = await showModalBottomSheet<_ImageSourceChoice>(
                   context: context,
                   builder: (context) => SafeArea(
                     child: Wrap(
@@ -325,19 +415,33 @@ class _AddImageButton extends StatelessWidget {
                         ListTile(
                           leading: const Icon(Icons.photo_library_outlined),
                           title: const Text('Choose from gallery'),
-                          onTap: () => Navigator.of(context).pop(ImageSource.gallery),
+                          onTap: () => Navigator.of(context).pop(_ImageSourceChoice.gallery),
                         ),
                         ListTile(
                           leading: const Icon(Icons.photo_camera_outlined),
                           title: const Text('Take photo'),
-                          onTap: () => Navigator.of(context).pop(ImageSource.camera),
+                          onTap: () => Navigator.of(context).pop(_ImageSourceChoice.camera),
+                        ),
+                        ListTile(
+                          leading: const Icon(Icons.folder_zip_outlined),
+                          title: const Text('Import DICOM (.dcm)'),
+                          subtitle: const Text('X-ray export from a dental sensor/PACS'),
+                          onTap: () => Navigator.of(context).pop(_ImageSourceChoice.dicom),
                         ),
                       ],
                     ),
                   ),
                 );
-                if (source == ImageSource.gallery) onPickGallery();
-                if (source == ImageSource.camera) onPickCamera();
+                switch (source) {
+                  case _ImageSourceChoice.gallery:
+                    onPickGallery();
+                  case _ImageSourceChoice.camera:
+                    onPickCamera();
+                  case _ImageSourceChoice.dicom:
+                    onPickDicom();
+                  case null:
+                    break;
+                }
               },
         style: OutlinedButton.styleFrom(padding: EdgeInsets.zero),
         child: busy

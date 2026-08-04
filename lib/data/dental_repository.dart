@@ -121,13 +121,15 @@ class DentalRepository {
   Future<ToothImage> addImage(
     int patientId,
     int toothNumber,
-    String filePath,
-  ) async {
+    String filePath, {
+    String? originalDicomPath,
+  }) async {
     final db = await _database.database;
     final image = ToothImage(
       patientId: patientId,
       toothNumber: toothNumber,
       filePath: filePath,
+      originalDicomPath: originalDicomPath,
       createdAt: DateTime.now(),
     );
     final id = await db.insert('tooth_images', image.toMap());
@@ -136,6 +138,7 @@ class DentalRepository {
       patientId: patientId,
       toothNumber: toothNumber,
       filePath: filePath,
+      originalDicomPath: originalDicomPath,
       createdAt: image.createdAt,
     );
   }

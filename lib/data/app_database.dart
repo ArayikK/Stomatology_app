@@ -56,6 +56,7 @@ class AppDatabase {
             patient_id INTEGER NOT NULL,
             tooth_number INTEGER NOT NULL,
             file_path TEXT NOT NULL,
+            original_dicom_path TEXT,
             created_at TEXT NOT NULL,
             FOREIGN KEY (patient_id) REFERENCES patients (id) ON DELETE CASCADE
           )
