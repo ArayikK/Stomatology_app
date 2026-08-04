@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../models/note_category.dart';
 import 'dental_repository.dart';
 import 'device_identity.dart';
 
@@ -78,6 +79,7 @@ class BackendSyncService {
             for (final note in notes)
               {
                 'text': note.text,
+                'category': note.category.name,
                 'createdAt': note.createdAt.toIso8601String(),
                 'updatedAt': note.updatedAt.toIso8601String(),
               },
@@ -88,6 +90,9 @@ class BackendSyncService {
       patientPayloads.add({
         'firstName': patient.firstName,
         'lastName': patient.lastName,
+        'allergies': patient.allergies,
+        'medications': patient.medications,
+        'medicalNotes': patient.medicalNotes,
         'createdAt': patient.createdAt.toIso8601String(),
         'teeth': teeth,
       });
@@ -116,6 +121,12 @@ class BackendSyncService {
         patientMap['firstName'] as String? ?? '',
         patientMap['lastName'] as String? ?? '',
       );
+      await repository.updatePatientMedicalInfo(
+        patient.id!,
+        allergies: patientMap['allergies'] as String? ?? '',
+        medications: patientMap['medications'] as String? ?? '',
+        medicalNotes: patientMap['medicalNotes'] as String? ?? '',
+      );
       final teeth = (patientMap['teeth'] as List?) ?? const [];
       for (final rawTooth in teeth) {
         final toothMap = rawTooth as Map<String, dynamic>;
@@ -128,6 +139,7 @@ class BackendSyncService {
             patient.id!,
             toothNumber,
             noteMap['text'] as String? ?? '',
+            category: NoteCategory.fromName(noteMap['category'] as String?),
           );
         }
 

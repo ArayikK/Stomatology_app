@@ -36,6 +36,9 @@ class AppDatabase {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             first_name TEXT NOT NULL,
             last_name TEXT NOT NULL,
+            allergies TEXT,
+            medications TEXT,
+            medical_notes TEXT,
             created_at TEXT NOT NULL
           )
         ''');
@@ -45,6 +48,7 @@ class AppDatabase {
             patient_id INTEGER NOT NULL,
             tooth_number INTEGER NOT NULL,
             text TEXT NOT NULL,
+            category TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
             FOREIGN KEY (patient_id) REFERENCES patients (id) ON DELETE CASCADE

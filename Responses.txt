@@ -182,3 +182,172 @@ deployment). The code and docs referenced already exist in the project.
 
 8. Decide on and communicate pricing/licensing (referenced in the FAQ but
    intentionally left for you to define outside the app).
+
+
+________________
+
+
+4) DEEP-DIVE: MOBILE DENTAL-CLINIC APPS YOU ASKED ABOUT
+---------------------------------------------------------
+You asked specifically about "Dental Cases," "My Dental Clinic," "My Dental
+Clinic Online," and similar apps. Unlike the earlier section (which named
+big desktop suites like Dentrix/Curve from general knowledge), this section
+is from actually pulling app-store listings, vendor pages, and reviews for
+each app below.
+
+First, a correction: "Dental Cases" (the literal app by that name on the
+App Store) turned out to be an exam-prep/education app for dental students
+studying for the CDA exam - case-based learning modules, a dental
+dictionary, note-taking for studying. It is not a practice-management or
+charting tool and isn't a real competitor to Stom. If you meant a
+different app by that name, let me know and I'll look again.
+
+--- My Dental Clinic / My Dental Clinic Online (QX Information Technology
+    Corp / "Quantum X") ---
+Two related apps from the same small vendor (Philippines-based). "My
+Dental Clinic" is the older/legacy app; "My Dental Clinic Online" is the
+newer cloud-synced version with a public patient-booking portal.
+
+What they have:
+- A visual per-tooth dental chart ("dental charting") - real, but the
+  vendor's own marketing never goes beyond the word "chart." No mention of
+  per-surface marking, standardized status codes (decay/filling/crown/
+  missing/implant), or which tooth-numbering system is used. Likely
+  simpler than what Stom already has.
+- Free-text notes attached to the chart, plus generic "attach dental
+  images" (no DICOM mentioned anywhere - images are almost certainly just
+  JPG/PNG photo attachments, not real radiographs).
+- Appointment list/calendar, SMS reminders (paid tiers), recall reminders,
+  and (Online only) a public-facing booking portal patients can request
+  appointments through, plus a one-tap "request a Zoom meeting" button.
+- Cash payment recording, installment tracking, expense tracking, basic
+  and "advanced" financial reports, PDF/Excel export and import.
+- Multi-dentist support (up to 4 dentists + 1 secretary) with role-based
+  permissions - web-version only, paid tier.
+- Tiered cloud backup (2.5-10GB depending on plan), offline-first with
+  sync, explicit "you can download your whole database anytime" data
+  portability promise.
+- PIN code app lock (paid tiers), self-declared HIPAA compliance and
+  "SSL AES 256" encryption (marketing language, no third-party audit/
+  certification referenced anywhere).
+- Multi-language UI (Spanish, Russian, Arabic, Portuguese) even on the
+  free tier.
+- A separate always-free "Screening" mini-product: a shareable public link
+  clinics send patients to fill out a pre-visit intake/screening form.
+- Fragmented, somewhat inconsistent pricing across ~6-7 SKUs (free up to
+  ~$30/mo); a real user review (iOS, 2024) reported a treatment-plan bug
+  where procedures got duplicated or lost.
+
+--- Dentulu / Dentulu Pro ("DentuluPro") ---
+A much bigger, telemedicine-first platform - patient-facing (Dentulu) and
+dentist-facing (DentuluPro) apps, not just a records tool.
+
+What they have:
+- "Electronic patient charts" and "perio charting" are named features, but
+  after checking every feature page and both app-store listings, there is
+  no evidence of an actual visual tooth-by-tooth odontogram - the
+  charting language is generic ("clinical documentation," "treatment
+  notes") or specifically periodontal (pocket depth/bleeding/recession),
+  not a full-mouth tooth chart. This is a real gap in a platform that
+  otherwise looks very polished.
+- DICOM is explicitly accepted as an upload format, but only in one
+  specific "second opinion" flow - not confirmed as a general viewer, and
+  there's no evidence they actually render/window DICOM images the way
+  Stom's DICOM importer now does (parse + display with proper contrast).
+- Live video consultations, async photo consults, 24/7 emergency
+  on-demand dentists, and paid second-opinion reviews ($149 dentist
+  review, $20 AI X-ray review) - teledentistry is their core differentiator.
+- AI radiograph analysis for caries/bone loss/calculus - but this turned
+  out to be a licensed third-party integration (Pearl AI, FDA-cleared),
+  not Dentulu's own in-house model. A separate, vaguer "60 oral health
+  parameters" AI claim for general photos has no published breakdown of
+  what it actually checks.
+- A bundled home intraoral camera ("MouthCAM," $99, free with annual
+  membership) - notably the wired version is NOT iOS-compatible, a real
+  gap in their own hardware line.
+- Electronic consent/medical-clearance forms, e-prescriptions, 2-way
+  encrypted messaging, a no-login time-limited file-sharing feature
+  ("Dental Drop") for sending images/records to outside labs/specialists.
+- Multi-provider network model - hygienists and specialists can join and
+  earn through the platform, not just clinic staff accounts.
+- Pricing is genuinely inconsistent across their own pages ($79-99/mo
+  provider plans, conflicting setup fees between pages) - and reviews
+  flagged real problems: paid AI X-ray reviews failing to load, broken
+  chat, unanswered "free consultation" calls redirected to a $55 paid
+  call, and providers who signed up and never got a single referral.
+
+--- Smaller/other mobile dental apps checked ---
+- DentiCalc: not a practice-management tool at all - a chairside
+  patient-education and treatment-cost-quoting tool (photo/video library +
+  pricing calculator). No chart, no records, no scheduling.
+- AppointDent: small, new (2026), scheduling + basic patient notes app.
+  No tooth chart, no image upload, no billing.
+- Dentem: the most full-featured of the small apps - scheduling, patient
+  profiles, medical history, treatment plans, image upload (X-rays/photos,
+  not DICOM), SMS/email reminders, staff management. No confirmed tooth
+  chart.
+- Clinicia: not dental-specific (a general multi-specialty clinic system
+  with a "dental" skin) - but has real strengths Stom and the others
+  don't: queue/waiting-room management, inventory/stock alerts, and
+  actual dental lab order management (crown/bridge/implant specs, shade,
+  trial dates). No tooth chart, no DICOM.
+- iDentalSoft: no real native app - "mobile" just means their web app
+  works in a mobile browser.
+- Open Dental: desktop-only core, but a real mobile ecosystem around it -
+  their own ODMobile (schedule/texting/e-prescribing/view-only images) and
+  eClipboard (paperless intake) apps, plus third-party companion apps like
+  FlexMobile built on Open Dental's API. None of the mobile pieces do
+  clinical charting - that stays desktop-only.
+
+Across every single app researched here, none confirmed real DICOM
+support with actual image rendering/windowing - at best, DICOM is
+accepted as an upload format without evidence of proper decoding, most
+never mention it at all. That's a genuine, verified point of difference
+for Stom, not just a guess.
+
+--- What this means for Stom ---
+
+Where Stom is already ahead of everything researched:
+- Real DICOM decoding (uncompressed, JPEG Baseline, JPEG Lossless) with
+  proper windowing/contrast - nobody else researched actually does this.
+- A real, working visual tooth-by-tooth odontogram - several competitors
+  either don't have one (Dentulu, Clinicia) or it's unclear how deep
+  theirs goes (My Dental Clinic, Dentem).
+
+Real gaps worth considering, roughly ordered by how common they are
+across competitors (i.e. how much they're apparently expected) vs. how
+much work they'd take:
+
+1. Appointment scheduling/calendar - every single competitor researched
+   has this in some form. Biggest, most consistent gap.
+2. SMS/communication (reminders at minimum, 2-way texting in the fuller
+   apps) - very common, pairs naturally with scheduling.
+3. PIN/app-lock security - cheap to add, present even in the free/cheap
+   tier of the simplest competitor (My Dental Clinic).
+4. Multi-user support (secretary/front-desk account, multiple dentists
+   sharing one clinic) - common in every paid tier across competitors;
+   Stom is currently single-device/no-accounts by design.
+5. Billing/expense tracking - common (My Dental Clinic, Clinicia, Dentem);
+   even a basic "cost per treatment + running total" would close this gap
+   without building a full accounting module.
+6. Treatment plans as a distinct structured thing (procedure + status +
+   cost), not just free-text notes - matches the "quick-pick procedure
+   list" idea from the earlier feature-ideas section, and is explicitly
+   named by both My Dental Clinic and Dentulu.
+7. Data export (PDF/Excel per patient) - simple, present in My Dental
+   Clinic's paid tier, useful for referrals/insurance.
+8. Patient-facing booking/self-scheduling portal - present in My Dental
+   Clinic Online and Dentulu; bigger scope, only worth it once internal
+   scheduling exists.
+9. Telemedicine/video consults and AI radiograph analysis - Dentulu's
+   whole pitch, but a much larger investment (and their execution has
+   real reported problems - broken AI reviews, unanswered calls). Given
+   Stom's current positioning as a focused charting tool done well, this
+   is worth treating as a "maybe eventually," not a near-term priority.
+
+Suggested sequencing, factoring in this new research alongside the
+earlier feature list: appointment scheduling first (the one gap every
+competitor has and Stom doesn't), then PIN lock (cheap, real security
+value), then treatment-plan structure + billing basics together (they
+naturally share data), then multi-user accounts once there's something
+worth sharing access to.

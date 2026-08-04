@@ -1,3 +1,4 @@
+import '../models/note_category.dart';
 import '../models/patient.dart';
 import '../models/tooth_image.dart';
 import '../models/tooth_note.dart';
@@ -24,6 +25,25 @@ class DentalRepository {
     );
     final id = await db.insert('patients', patient.toMap());
     return patient.copyWith(id: id);
+  }
+
+  Future<void> updatePatientMedicalInfo(
+    int patientId, {
+    required String allergies,
+    required String medications,
+    required String medicalNotes,
+  }) async {
+    final db = await _database.database;
+    await db.update(
+      'patients',
+      {
+        'allergies': allergies.trim(),
+        'medications': medications.trim(),
+        'medical_notes': medicalNotes.trim(),
+      },
+      where: 'id = ?',
+      whereArgs: [patientId],
+    );
   }
 
   Future<void> deletePatient(int patientId) async {
@@ -77,13 +97,32 @@ class DentalRepository {
     return rows.map(ToothNote.fromMap).toList();
   }
 
-  Future<ToothNote> addNote(int patientId, int toothNumber, String text) async {
+  /// All notes for a patient across every tooth, newest first - the
+  /// chronological treatment timeline.
+  Future<List<ToothNote>> getAllNotesForPatient(int patientId) async {
+    final db = await _database.database;
+    final rows = await db.query(
+      'tooth_notes',
+      where: 'patient_id = ?',
+      whereArgs: [patientId],
+      orderBy: 'created_at DESC',
+    );
+    return rows.map(ToothNote.fromMap).toList();
+  }
+
+  Future<ToothNote> addNote(
+    int patientId,
+    int toothNumber,
+    String text, {
+    NoteCategory category = NoteCategory.other,
+  }) async {
     final db = await _database.database;
     final now = DateTime.now();
     final note = ToothNote(
       patientId: patientId,
       toothNumber: toothNumber,
       text: text.trim(),
+      category: category,
       createdAt: now,
       updatedAt: now,
     );
@@ -91,9 +130,17 @@ class DentalRepository {
     return note.copyWith(id: id);
   }
 
-  Future<void> updateNote(ToothNote note, String newText) async {
+  Future<void> updateNote(
+    ToothNote note,
+    String newText, {
+    NoteCategory? category,
+  }) async {
     final db = await _database.database;
-    final updated = note.copyWith(text: newText.trim(), updatedAt: DateTime.now());
+    final updated = note.copyWith(
+      text: newText.trim(),
+      category: category,
+      updatedAt: DateTime.now(),
+    );
     await db.update(
       'tooth_notes',
       updated.toMap(),
@@ -157,63 +204,105 @@ class DentalRepository {
 
     for (final seed in _sampleSeed) {
       final patient = await addPatient(seed.firstName, seed.lastName);
+      await updatePatientMedicalInfo(
+        patient.id!,
+        allergies: seed.allergies,
+        medications: seed.medications,
+        medicalNotes: seed.medicalNotes,
+      );
       for (final note in seed.notes) {
-        await addNote(patient.id!, note.toothNumber, note.text);
+        await addNote(patient.id!, note.toothNumber, note.text, category: note.category);
       }
     }
   }
 }
 
 class _SeedNote {
-  const _SeedNote(this.toothNumber, this.text);
+  const _SeedNote(this.toothNumber, this.text, this.category);
   final int toothNumber;
   final String text;
+  final NoteCategory category;
 }
 
 class _SeedPatient {
-  const _SeedPatient(this.firstName, this.lastName, this.notes);
+  const _SeedPatient(
+    this.firstName,
+    this.lastName,
+    this.notes, {
+    this.allergies = '',
+    this.medications = '',
+    this.medicalNotes = '',
+  });
   final String firstName;
   final String lastName;
   final List<_SeedNote> notes;
+  final String allergies;
+  final String medications;
+  final String medicalNotes;
 }
 
 const _sampleSeed = [
-  _SeedPatient('Anna', 'Petrosyan', [
-    _SeedNote(
-      3,
-      'Deep cavity on the occlusal surface, cleaned and filled with composite resin. No sensitivity reported at follow-up.',
-    ),
-    _SeedNote(
-      14,
-      'Root canal treatment completed over two visits. Crown placement recommended within the next month to protect the tooth.',
-    ),
-    _SeedNote(
-      30,
-      'Early-stage decay spotted on routine check-up. Watching for progression; no treatment yet, re-evaluate in 6 months.',
-    ),
-  ]),
-  _SeedPatient('David', 'Grigoryan', [
-    _SeedNote(
-      8,
-      'Chipped central incisor from a minor accident, repaired with composite bonding. Advised to avoid biting hard objects.',
-    ),
-    _SeedNote(
-      19,
-      'Large cavity between molars, filled after local anesthesia. Mild sensitivity to cold expected for 1-2 weeks.',
-    ),
-  ]),
-  _SeedPatient('Mariam', 'Sargsyan', [
-    _SeedNote(
-      2,
-      'Severely decayed wisdom tooth extracted. Socket healing normally, follow-up scheduled in 2 weeks.',
-    ),
-    _SeedNote(
-      15,
-      'Crown fitted after previous root canal therapy. Bite adjusted and polished; patient reports no discomfort.',
-    ),
-    _SeedNote(
-      31,
-      'Impacted wisdom tooth, mildly symptomatic. Extraction recommended, patient scheduling for next visit.',
-    ),
-  ]),
+  _SeedPatient(
+    'Anna',
+    'Petrosyan',
+    [
+      _SeedNote(
+        3,
+        'Deep cavity on the occlusal surface, cleaned and filled with composite resin. No sensitivity reported at follow-up.',
+        NoteCategory.filling,
+      ),
+      _SeedNote(
+        14,
+        'Root canal treatment completed over two visits. Crown placement recommended within the next month to protect the tooth.',
+        NoteCategory.rootCanal,
+      ),
+      _SeedNote(
+        30,
+        'Early-stage decay spotted on routine check-up. Watching for progression; no treatment yet, re-evaluate in 6 months.',
+        NoteCategory.consultation,
+      ),
+    ],
+    allergies: 'Penicillin (rash)',
+    medications: 'Metformin 500mg daily',
+    medicalNotes: 'Type 2 diabetes, well controlled.',
+  ),
+  _SeedPatient(
+    'David',
+    'Grigoryan',
+    [
+      _SeedNote(
+        8,
+        'Chipped central incisor from a minor accident, repaired with composite bonding. Advised to avoid biting hard objects.',
+        NoteCategory.filling,
+      ),
+      _SeedNote(
+        19,
+        'Large cavity between molars, filled after local anesthesia. Mild sensitivity to cold expected for 1-2 weeks.',
+        NoteCategory.filling,
+      ),
+    ],
+  ),
+  _SeedPatient(
+    'Mariam',
+    'Sargsyan',
+    [
+      _SeedNote(
+        2,
+        'Severely decayed wisdom tooth extracted. Socket healing normally, follow-up scheduled in 2 weeks.',
+        NoteCategory.extraction,
+      ),
+      _SeedNote(
+        15,
+        'Crown fitted after previous root canal therapy. Bite adjusted and polished; patient reports no discomfort.',
+        NoteCategory.crown,
+      ),
+      _SeedNote(
+        31,
+        'Impacted wisdom tooth, mildly symptomatic. Extraction recommended, patient scheduling for next visit.',
+        NoteCategory.consultation,
+      ),
+    ],
+    allergies: 'Latex',
+    medicalNotes: 'Pregnant (2nd trimester) - avoid X-rays unless essential.',
+  ),
 ];
