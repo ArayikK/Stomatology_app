@@ -507,3 +507,77 @@ row was a third copy of the same navigation.
   `test/appointments_and_timeline_test.dart`. The tour tests pass on all four phone sizes.
 - `flutter build apk --release`: rebuilt, `build/app/outputs/flutter-apk/app-release.apk` (60.6 MB).
   This APK also carries the database-migration fix from the entry above.
+
+---
+
+## 2026-09-20 — Bundled sample x-ray, zip on the Desktop, and pushed to GitHub
+
+### 1. A real x-ray now ships inside the app
+`C:\Users\arayi\Desktop\3DSlice124.dcm` is bundled as **`assets/sample/sample_xray.dcm`** and imported
+on launch onto **Anna Petrosyan, tooth 14** (the tooth her seeded note describes as root-canal
+treated), so anyone opening a fresh install already sees a radiograph in that patient's history.
+
+- New file **`lib/data/sample_xray.dart`** → `seedSampleXrayIfMissing(repository)`, called from
+  `main()` right after `seedSampleDataIfEmpty()`.
+- It parses the DICOM with the app's own parser, renders it through `DicomImageConverter`, writes the
+  PNG **and** the original `.dcm` into `<app documents>/xrays/`, then inserts a `tooth_images` row
+  with `original_dicom_path` set — exactly what a manual "Import DICOM" does, so all the image tools
+  (annotate, pair before/after, export the original) work on it.
+- Skipped if that tooth already has an image, so it is imported once and never touches real data.
+  It also works on an *update*, not just a clean install — your friend will get it too.
+- The file is a **CBCT axial slice, 811×811, 16-bit MONOCHROME2, JPEG Lossless** — it goes through the
+  Process 14 decoder added back in `5c40204`.
+
+### ⚠️ The DICOM had a real patient name in it
+The original carried `(0010,0010) PatientName = "Karapetyan^Tigran"` and a patient ID. The repo is
+**public** (`github.com/ArayikK/Stomatology_app`, `private=False`) and the APK goes to other people,
+so the bundled copy was **anonymised**: name → `Demo^Patient`, ID → `STOM-DEMO-PATIENT-01`. Same byte
+length, so the file still parses and renders identically (test re-run after the edit). Study dates and
+the Carestream device tags were left as they are — they identify nobody. **Your Desktop copy was not
+touched.** If you ever ship other real scans, strip the patient tags the same way first.
+
+### 2. Zip on the Desktop
+`C:\Users\arayi\Desktop\3DSlice124.zip` (506 KB) — the original `.dcm`, untouched and not anonymised.
+
+### 3. GitHub
+The project **was** already on GitHub at **https://github.com/ArayikK/Stomatology_app** (public,
+default branch `main`), but nothing since **2026-08-04** had been pushed: `origin/main` was still at
+`143f1f9` while ~70 files of work sat uncommitted locally.
+
+Committed as **`46e1320`** and pushed — 71 files, +5610/−610. That single commit carries everything
+from these sessions: welcome screen, app tour, new dashboard, app icons, the schema-migration fix, the
+"Details" error text, the removed quick-action row, the bundled x-ray, and the new tests.
+
+### New test
+**`test/sample_xray_test.dart`** — seeds the sample data, runs the x-ray import against a temp
+documents directory, and checks a `tooth_images` row exists for Anna's tooth 14 with both files on
+disk; a second run must not add a duplicate.
+
+### Verified
+- `flutter analyze`: no issues.
+- `flutter test`: 21 pass; the same 4 pre-existing failures in `appointments_and_timeline_test.dart`.
+- `flutter build apk --release`: **61.1 MB** (up from 60.6 — that's the x-ray),
+  `build/app/outputs/flutter-apk/app-release.apk`. This is the one to send.
+
+---
+
+## 2026-09-20 — Project zip, and what actually went to GitHub
+
+### The zip you meant
+**`C:\Users\arayi\Desktop\Stom-project.zip`** (4.2 MB) — the whole project, ready to send to someone.
+
+Made with `git archive HEAD`, so it holds exactly the 200 files the repo tracks (everything unzips
+into a single `Stom/` folder): all of `lib/`, `test/`, `backend/`, `assets/`, `android/`, `ios/`,
+`windows/`, `macos/`, `linux/`, `web/`, `tools/`, `pubspec.yaml`, `README.md`, `NOTES.md`. It does
+**not** contain `build/`, `.dart_tool/` or the git history, which is what makes it 4.2 MB instead of
+several hundred. Whoever receives it runs `flutter pub get` and it builds.
+
+The earlier `C:\Users\arayi\Desktop\3DSlice124.zip` is just the x-ray on its own — delete it if you
+don't need it.
+
+### What was pushed
+**All of it — the whole codebase, not only the x-ray.** Commit `46e1320` on
+`github.com/ArayikK/Stomatology_app` is 71 changed files (+5610/−610), and `origin/main` now matches
+the local `main` hash exactly: 200 tracked files, 47 `.dart` files, including `lib/screens/*`,
+`lib/data/*`, `lib/tour/*`, `lib/dicom/*`, every test, the backend, the app icons, and
+`assets/sample/sample_xray.dcm`.
