@@ -8,6 +8,8 @@ import '../data/dental_repository.dart';
 import '../models/patient.dart';
 import 'patient_profile_screen.dart';
 import 'tooth_detail_screen.dart';
+import '../tour/app_tour.dart';
+import '../tour/spotlight_tour.dart';
 
 class PatientChartScreen extends StatefulWidget {
   const PatientChartScreen({
@@ -30,11 +32,39 @@ class _PatientChartScreenState extends State<PatientChartScreen> {
   bool _loading = true;
   late Patient _patient;
 
+  final GlobalKey _chartKey = GlobalKey();
+  final GlobalKey _profileKey = GlobalKey();
+  final GlobalKey _allergyKey = GlobalKey();
+
+  List<TourStep> get _tourSteps => [
+    TourStep(
+      target: _chartKey,
+      title: 'The dental chart',
+      body: 'All 32 teeth. Tap any tooth to open its notes and x-rays. '
+          'Teeth that already have records are highlighted.',
+      pad: 4,
+    ),
+    TourStep(
+      target: _allergyKey,
+      title: 'Allergy warning',
+      body: 'Shown on every visit when the patient has allergies on file. Tap it to review them.',
+      pad: 2,
+    ),
+    TourStep(
+      target: _profileKey,
+      title: 'Medical history & timeline',
+      body: 'Allergies, medications, family links, and a timeline of every treatment for this patient.',
+      pad: 4,
+    ),
+  ];
+
   @override
   void initState() {
     super.initState();
     _patient = widget.patient;
-    _loadHistory();
+    _loadHistory().then((_) {
+      if (mounted) AppTour.maybeShow(context, TourScreen.chart, _tourSteps);
+    });
   }
 
   Future<void> _loadHistory() async {
@@ -89,6 +119,7 @@ class _PatientChartScreenState extends State<PatientChartScreen> {
         title: Text(_patient.fullName),
         actions: [
           IconButton(
+            key: _profileKey,
             tooltip: 'Medical history & treatment timeline',
             icon: const Icon(Icons.folder_shared_outlined),
             onPressed: _openProfile,
@@ -101,6 +132,7 @@ class _PatientChartScreenState extends State<PatientChartScreen> {
               children: [
                 if (_patient.hasAllergies)
                   Material(
+                    key: _allergyKey,
                     color: Theme.of(context).colorScheme.errorContainer,
                     child: InkWell(
                       onTap: _openProfile,
@@ -133,7 +165,11 @@ class _PatientChartScreenState extends State<PatientChartScreen> {
                       padding: const EdgeInsets.all(16),
                       child: AspectRatio(
                         aspectRatio: kViewBoxWidth / kViewBoxHeight,
-                        child: DentalChart(state: _toothStates, onToothTap: _onToothTap),
+                        child: DentalChart(
+                          key: _chartKey,
+                          state: _toothStates,
+                          onToothTap: _onToothTap,
+                        ),
                       ),
                     ),
                   ),

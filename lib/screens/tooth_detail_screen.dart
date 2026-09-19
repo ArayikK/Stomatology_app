@@ -16,7 +16,10 @@ import '../models/annotation_shape.dart';
 import '../models/note_category.dart';
 import '../models/tooth_image.dart';
 import '../models/tooth_note.dart';
+import 'dialog_metrics.dart';
 import 'image_annotation_screen.dart';
+import '../tour/app_tour.dart';
+import '../tour/spotlight_tour.dart';
 
 /// Full page for one tooth: its x-rays and its notes. A full page rather
 /// than a popup/bottom sheet, since a tooth can accumulate a lot of
@@ -45,6 +48,39 @@ class _ToothDetailScreenState extends State<ToothDetailScreen> {
   bool _loading = true;
   bool _busy = false;
 
+  final GlobalKey _xraysKey = GlobalKey();
+  final GlobalKey _addImageKey = GlobalKey();
+  final GlobalKey _notesKey = GlobalKey();
+  final GlobalKey _addNoteKey = GlobalKey();
+
+  List<TourStep> get _tourSteps => [
+    TourStep(
+      target: _xraysKey,
+      title: 'X-rays & photos',
+      body: 'Every image for this tooth. Tap one to view it full screen, draw annotations on it, '
+          'or pair a before and after shot.',
+      pad: 8,
+    ),
+    TourStep(
+      target: _addImageKey,
+      title: 'Add an image',
+      body: 'Take a photo, pick one from the gallery, or import a DICOM (.dcm) x-ray from your sensor.',
+      pad: 6,
+    ),
+    TourStep(
+      target: _notesKey,
+      title: 'Treatment notes',
+      body: 'Each note has a category and keeps its edit history, so earlier versions are never lost.',
+      pad: 8,
+    ),
+    TourStep(
+      target: _addNoteKey,
+      title: 'Add a note',
+      body: 'Type it, or tap the microphone in the editor and dictate hands-free.',
+      pad: 6,
+    ),
+  ];
+
   List<(ToothImage, ToothImage)> get _beforeAfterPairs {
     final pairs = <(ToothImage, ToothImage)>[];
     for (final before in _images.where((i) => i.role == ImageRole.before)) {
@@ -57,7 +93,9 @@ class _ToothDetailScreenState extends State<ToothDetailScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    _load().then((_) {
+      if (mounted) AppTour.maybeShow(context, TourScreen.tooth, _tourSteps);
+    });
   }
 
   Future<void> _load() async {
@@ -110,26 +148,57 @@ class _ToothDetailScreenState extends State<ToothDetailScreen> {
               );
             }
 
+            // The dialog is given one explicit width so the category grid,
+            // the note field and the buttons all share the same edges - an
+            // AlertDialog otherwise sizes itself to its widest child.
+            final dialogWidth = kDialogContentWidth(context);
+            const chipSpacing = 8.0;
+            final chipColumns = dialogWidth >= 380 ? 3 : 2;
+            final chipWidth =
+                (dialogWidth - chipSpacing * (chipColumns - 1)) / chipColumns;
+
             return AlertDialog(
               title: Text(existing == null ? 'Add note' : 'Edit note'),
               content: SingleChildScrollView(
-                child: Column(
+                child: SizedBox(
+                  width: dialogWidth,
+                  child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Category', style: Theme.of(context).textTheme.labelLarge),
                     const SizedBox(height: 8),
+                    // Equal-width chips laid out on a grid: a plain Wrap left a
+                    // ragged right edge, and any size change on selection would
+                    // reflow the rows.
                     Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+                      spacing: chipSpacing,
+                      runSpacing: chipSpacing,
                       children: [
                         for (final category in NoteCategory.values)
-                          ChoiceChip(
-                            label: Text(category.label),
-                            selected: selectedCategory == category,
-                            selectedColor: category.color.withValues(alpha: 0.3),
-                            side: BorderSide(color: category.color.withValues(alpha: 0.5)),
-                            onSelected: (_) => setDialogState(() => selectedCategory = category),
+                          SizedBox(
+                            width: chipWidth,
+                            child: ChoiceChip(
+                              label: Center(
+                                child: Text(
+                                  category.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              selected: selectedCategory == category,
+                              // Selection shows purely through colour - a
+                              // checkmark would shift the label off-centre.
+                              showCheckmark: false,
+                              selectedColor: category.color.withValues(alpha: 0.35),
+                              side: BorderSide(
+                                color: category.color.withValues(
+                                  alpha: selectedCategory == category ? 0.9 : 0.4,
+                                ),
+                              ),
+                              onSelected: (_) =>
+                                  setDialogState(() => selectedCategory = category),
+                            ),
                           ),
                       ],
                     ),
@@ -161,6 +230,7 @@ class _ToothDetailScreenState extends State<ToothDetailScreen> {
                         ),
                       ),
                   ],
+                  ),
                 ),
               ),
               actions: [
@@ -564,6 +634,7 @@ class _ToothDetailScreenState extends State<ToothDetailScreen> {
     return Scaffold(
       appBar: AppBar(title: Text('Tooth ${widget.toothNumber}')),
       floatingActionButton: FloatingActionButton.extended(
+        key: _addNoteKey,
         onPressed: () => _showNoteEditor(),
         icon: const Icon(Icons.add),
         label: const Text('Add note'),
@@ -576,6 +647,7 @@ class _ToothDetailScreenState extends State<ToothDetailScreen> {
                 Text('X-rays', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
                 SizedBox(
+                  key: _xraysKey,
                   height: 96,
                   child: ListView(
                     scrollDirection: Axis.horizontal,
@@ -623,6 +695,7 @@ class _ToothDetailScreenState extends State<ToothDetailScreen> {
                           ),
                         ),
                       _AddImageButton(
+                        key: _addImageKey,
                         busy: _busy,
                         onPickGallery: () => _pickImage(ImageSource.gallery),
                         onPickCamera: () => _pickImage(ImageSource.camera),
@@ -654,7 +727,7 @@ class _ToothDetailScreenState extends State<ToothDetailScreen> {
                     ),
                 ],
                 const SizedBox(height: 24),
-                Text('Notes', style: Theme.of(context).textTheme.titleMedium),
+                Text('Notes', key: _notesKey, style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
                 if (_notes.isEmpty)
                   const Padding(
@@ -839,6 +912,7 @@ enum _ImageSourceChoice { gallery, camera, dicom }
 
 class _AddImageButton extends StatelessWidget {
   const _AddImageButton({
+    super.key,
     required this.busy,
     required this.onPickGallery,
     required this.onPickCamera,

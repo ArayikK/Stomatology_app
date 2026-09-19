@@ -1,14 +1,28 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/annotation_shape.dart';
 import '../models/note_category.dart';
+import '../models/tooth_note.dart';
 import 'dental_repository.dart';
 import 'device_identity.dart';
+
+enum SyncState { idle, syncing, synced, failed }
+
+class SyncStatus {
+  const SyncStatus(this.state, {this.lastSuccessAt});
+
+  final SyncState state;
+
+  /// When a backup last reached the backend, or null if never.
+  final DateTime? lastSuccessAt;
+}
 
 /// Talks to the backend in backend/ - see backend/README.md. Every call is
 /// best-effort: an offline/unreachable backend must never block or crash
@@ -22,7 +36,76 @@ class BackendSyncService {
 
   static const String baseUrl = 'https://stomatology-app.onrender.com';
 
-  Future<bool> pushAll() async {
+  /// The free Render instance sleeps when idle and has been measured taking
+  /// ~70 s to wake up, so anything shorter makes the first request after a
+  /// quiet period fail.
+  static const Duration _requestTimeout = Duration(seconds: 90);
+  static const int _pushAttempts = 2;
+  static const String _lastSuccessPrefsKey = 'stom_last_backup_at';
+
+  final ValueNotifier<SyncStatus> status = ValueNotifier(const SyncStatus(SyncState.idle));
+
+  Future<bool>? _pushInFlight;
+  bool _pushQueued = false;
+
+  /// Loads the last backup time and pings the backend so a sleeping server
+  /// starts waking up before the first real backup is needed.
+  Future<void> warmUp() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getString(_lastSuccessPrefsKey);
+      final lastSuccessAt = saved == null ? null : DateTime.tryParse(saved);
+      if (lastSuccessAt != null && status.value.lastSuccessAt == null) {
+        status.value = SyncStatus(status.value.state, lastSuccessAt: lastSuccessAt);
+      }
+    } catch (_) {}
+    try {
+      await _client.get(Uri.parse('$baseUrl/')).timeout(_requestTimeout);
+    } catch (_) {}
+  }
+
+  /// Uploads the full local dataset. Calls made while an upload is running
+  /// don't start a parallel one; they schedule a single follow-up upload so
+  /// the latest edits are always sent.
+  Future<bool> pushAll() {
+    final inFlight = _pushInFlight;
+    if (inFlight != null) {
+      _pushQueued = true;
+      return inFlight;
+    }
+    final push = _pushWithRetry();
+    _pushInFlight = push;
+    return push;
+  }
+
+  Future<bool> _pushWithRetry() async {
+    var succeeded = false;
+    try {
+      do {
+        _pushQueued = false;
+        status.value = SyncStatus(SyncState.syncing, lastSuccessAt: status.value.lastSuccessAt);
+        succeeded = false;
+        for (var attempt = 0; attempt < _pushAttempts && !succeeded; attempt++) {
+          succeeded = await _pushOnce();
+        }
+        if (succeeded) {
+          final now = DateTime.now();
+          status.value = SyncStatus(SyncState.synced, lastSuccessAt: now);
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString(_lastSuccessPrefsKey, now.toIso8601String());
+          } catch (_) {}
+        } else {
+          status.value = SyncStatus(SyncState.failed, lastSuccessAt: status.value.lastSuccessAt);
+        }
+      } while (_pushQueued);
+    } finally {
+      _pushInFlight = null;
+    }
+    return succeeded;
+  }
+
+  Future<bool> _pushOnce() async {
     try {
       final deviceId = await DeviceIdentity.get();
       final payload = await _buildPayload();
@@ -32,7 +115,7 @@ class BackendSyncService {
             headers: const {'Content-Type': 'application/json'},
             body: jsonEncode({'data': payload}),
           )
-          .timeout(const Duration(seconds: 20));
+          .timeout(_requestTimeout);
       return response.statusCode == 200;
     } catch (_) {
       return false;
@@ -58,7 +141,9 @@ class BackendSyncService {
     final patientPayloads = <Map<String, dynamic>>[];
     for (final patient in patients) {
       final teeth = <Map<String, dynamic>>[];
-      for (var number = 1; number <= 32; number++) {
+      // Starts at kGeneralToothNumber (0), not 1: timeline entries that
+      // aren't about a specific tooth live there and must sync too.
+      for (var number = kGeneralToothNumber; number <= 32; number++) {
         final notes = await repository.getNotes(patient.id!, number);
         final images = await repository.getImages(patient.id!, number);
         if (notes.isEmpty && images.isEmpty) continue;

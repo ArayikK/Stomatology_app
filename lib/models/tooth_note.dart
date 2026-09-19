@@ -1,5 +1,10 @@
 import 'note_category.dart';
 
+/// Tooth number used by treatment-timeline entries that aren't about one
+/// tooth (a cleaning, a check-up, a consultation about the whole mouth).
+/// Real teeth are 1-32, so 0 can never collide with one.
+const int kGeneralToothNumber = 0;
+
 class ToothNote {
   final int? id;
   final int patientId;
@@ -19,10 +24,13 @@ class ToothNote {
     required this.updatedAt,
   });
 
+  bool get isGeneral => toothNumber == kGeneralToothNumber;
+
   ToothNote copyWith({
     int? id,
     String? text,
     NoteCategory? category,
+    DateTime? createdAt,
     DateTime? updatedAt,
   }) {
     return ToothNote(
@@ -31,7 +39,7 @@ class ToothNote {
       toothNumber: toothNumber,
       text: text ?? this.text,
       category: category ?? this.category,
-      createdAt: createdAt,
+      createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }

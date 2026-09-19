@@ -9,7 +9,9 @@ import '../models/patient.dart';
 import '../models/patient_relationship.dart';
 import '../models/relationship_type.dart';
 import '../models/tooth_note.dart';
+import 'dialog_metrics.dart';
 import 'patient_chart_screen.dart';
+import 'patient_picker.dart';
 import 'tooth_detail_screen.dart';
 
 /// Patient-level info that doesn't belong to any single tooth: medical
@@ -48,10 +50,14 @@ class _PatientProfileScreenState extends State<PatientProfileScreen> {
         appBar: AppBar(
           title: Text(_patient.fullName),
           bottom: const TabBar(
+            // Tight label padding plus scale-down text keeps the longest
+            // label ("Treatment Timeline") fully readable on narrow phones
+            // instead of being clipped by its tab.
+            labelPadding: EdgeInsets.symmetric(horizontal: 6),
             tabs: [
-              Tab(text: 'Medical History'),
-              Tab(text: 'Treatment Timeline'),
-              Tab(text: 'Family'),
+              _ProfileTab(label: 'Medical History'),
+              _ProfileTab(label: 'Treatment Timeline'),
+              _ProfileTab(label: 'Family'),
             ],
           ),
         ),
@@ -79,6 +85,24 @@ class _PatientProfileScreenState extends State<PatientProfileScreen> {
   }
 }
 
+/// A tab whose label shrinks to fit its slice of the bar rather than
+/// overflowing, so every tab title stays fully visible at any screen width.
+class _ProfileTab extends StatelessWidget {
+  const _ProfileTab({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tab(
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text(label, maxLines: 1, softWrap: false),
+      ),
+    );
+  }
+}
+
 class _MedicalHistoryTab extends StatefulWidget {
   const _MedicalHistoryTab({
     required this.repository,
@@ -98,8 +122,15 @@ class _MedicalHistoryTabState extends State<_MedicalHistoryTab> {
   late final TextEditingController _allergiesController;
   late final TextEditingController _medicationsController;
   late final TextEditingController _notesController;
-  bool _dirty = false;
   bool _saving = false;
+
+  /// Derived from the fields rather than latched by a flag, so it clears
+  /// again if an edit is typed and then undone, and so the allergy banner
+  /// and the Save button always agree with what's on screen.
+  bool get _dirty =>
+      _allergiesController.text.trim() != (widget.patient.allergies ?? '').trim() ||
+      _medicationsController.text.trim() != (widget.patient.medications ?? '').trim() ||
+      _notesController.text.trim() != (widget.patient.medicalNotes ?? '').trim();
 
   @override
   void initState() {
@@ -108,10 +139,12 @@ class _MedicalHistoryTabState extends State<_MedicalHistoryTab> {
     _medicationsController = TextEditingController(text: widget.patient.medications ?? '');
     _notesController = TextEditingController(text: widget.patient.medicalNotes ?? '');
     for (final controller in [_allergiesController, _medicationsController, _notesController]) {
-      controller.addListener(() {
-        if (!_dirty) setState(() => _dirty = true);
-      });
+      controller.addListener(_onFieldChanged);
     }
+  }
+
+  void _onFieldChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -138,10 +171,7 @@ class _MedicalHistoryTabState extends State<_MedicalHistoryTab> {
       ),
     );
     if (!mounted) return;
-    setState(() {
-      _saving = false;
-      _dirty = false;
-    });
+    setState(() => _saving = false);
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Medical history saved.')),
     );
@@ -150,7 +180,8 @@ class _MedicalHistoryTabState extends State<_MedicalHistoryTab> {
   @override
   Widget build(BuildContext context) {
     final hasAllergies = _allergiesController.text.trim().isNotEmpty;
-    final colorScheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -179,7 +210,7 @@ class _MedicalHistoryTabState extends State<_MedicalHistoryTab> {
                       const SizedBox(width: 8),
                       Text(
                         'ALLERGIES',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        style: theme.textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.bold,
                           color: hasAllergies ? colorScheme.onErrorContainer : null,
                           letterSpacing: 0.5,
@@ -187,7 +218,10 @@ class _MedicalHistoryTabState extends State<_MedicalHistoryTab> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 12),
+                  // A bordered field, not borderless text: the whole tab used
+                  // to read as a printed record rather than as something you
+                  // can type into.
                   TextField(
                     controller: _allergiesController,
                     maxLines: null,
@@ -197,9 +231,11 @@ class _MedicalHistoryTabState extends State<_MedicalHistoryTab> {
                             fontWeight: FontWeight.w600,
                           )
                         : null,
-                    decoration: const InputDecoration(
-                      hintText: 'None known - tap to add (e.g. penicillin, latex)',
-                      border: InputBorder.none,
+                    decoration: InputDecoration(
+                      hintText: 'None known - type to add (e.g. penicillin, latex)',
+                      border: const OutlineInputBorder(),
+                      filled: hasAllergies,
+                      fillColor: hasAllergies ? colorScheme.surface : null,
                       isDense: true,
                     ),
                   ),
@@ -219,7 +255,7 @@ class _MedicalHistoryTabState extends State<_MedicalHistoryTab> {
             controller: _notesController,
             hint: 'e.g. diabetes, pregnancy, heart conditions, past surgeries',
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
           FilledButton.icon(
             onPressed: (_dirty && !_saving) ? _save : null,
             icon: _saving
@@ -230,6 +266,14 @@ class _MedicalHistoryTabState extends State<_MedicalHistoryTab> {
                   )
                 : const Icon(Icons.save_outlined),
             label: const Text('Save changes'),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _dirty ? 'Unsaved changes' : 'Everything here is saved.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: _dirty ? colorScheme.error : colorScheme.onSurfaceVariant,
+            ),
           ),
         ],
       ),
@@ -246,10 +290,11 @@ class _MedicalField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Card(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+        side: BorderSide(color: theme.colorScheme.outlineVariant),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -258,9 +303,10 @@ class _MedicalField extends StatelessWidget {
           children: [
             Text(
               label.toUpperCase(),
-              style: Theme.of(
-                context,
-              ).textTheme.labelLarge?.copyWith(letterSpacing: 0.5, color: Colors.grey[600]),
+              style: theme.textTheme.labelLarge?.copyWith(
+                letterSpacing: 0.5,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 8),
             TextField(
@@ -268,7 +314,7 @@ class _MedicalField extends StatelessWidget {
               maxLines: null,
               decoration: InputDecoration(
                 hintText: hint,
-                border: InputBorder.none,
+                border: const OutlineInputBorder(),
                 isDense: true,
               ),
             ),
@@ -300,75 +346,397 @@ class _TreatmentTimelineTabState extends State<_TreatmentTimelineTab> {
   @override
   void initState() {
     super.initState();
+    _load();
+  }
+
+  void _load() {
     _notesFuture = widget.repository.getAllNotesForPatient(widget.patient.id!);
   }
 
-  void _reload() {
-    setState(() {
-      _notesFuture = widget.repository.getAllNotesForPatient(widget.patient.id!);
-    });
+  void _reload() => setState(_load);
+
+  /// Records a treatment straight onto the timeline. The same entries also
+  /// show on the tooth they belong to, so this is a second way into the
+  /// same records rather than a separate list - and an entry that isn't
+  /// about one tooth (a cleaning, a check-up) can go in as "general".
+  Future<void> _addEntry() async {
+    final result = await showDialog<_TimelineEntryResult>(
+      context: context,
+      builder: (context) => const _TimelineEntryDialog(),
+    );
+    if (result == null) return;
+
+    await widget.repository.addNote(
+      widget.patient.id!,
+      result.toothNumber,
+      result.text,
+      category: result.category,
+      createdAt: result.date,
+    );
+    if (!mounted) return;
+    _reload();
+    unawaited(widget.syncService.pushAll());
+  }
+
+  Future<void> _editEntry(ToothNote note) async {
+    final result = await showDialog<_TimelineEntryResult>(
+      context: context,
+      builder: (context) => _TimelineEntryDialog(existing: note),
+    );
+    if (result == null) return;
+
+    await widget.repository.updateNote(
+      note,
+      result.text,
+      category: result.category,
+      createdAt: result.date,
+    );
+    if (result.toothNumber != note.toothNumber) {
+      await widget.repository.moveNoteToTooth(note.id!, result.toothNumber);
+    }
+    if (!mounted) return;
+    _reload();
+    unawaited(widget.syncService.pushAll());
+  }
+
+  Future<void> _deleteEntry(ToothNote note) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete this entry?'),
+        content: Text(note.text, maxLines: 4, overflow: TextOverflow.ellipsis),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Keep'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    await widget.repository.deleteNote(note.id!);
+    if (!mounted) return;
+    _reload();
+    unawaited(widget.syncService.pushAll());
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Entry deleted.'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () async {
+            await widget.repository.addNote(
+              note.patientId,
+              note.toothNumber,
+              note.text,
+              category: note.category,
+              createdAt: note.createdAt,
+            );
+            if (mounted) _reload();
+            unawaited(widget.syncService.pushAll());
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openTooth(int toothNumber) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => ToothDetailScreen(
+          repository: widget.repository,
+          syncService: widget.syncService,
+          patientId: widget.patient.id!,
+          toothNumber: toothNumber,
+        ),
+      ),
+    );
+    if (mounted) _reload();
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<ToothNote>>(
-      future: _notesFuture,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final notes = snapshot.data ?? const [];
-        if (notes.isEmpty) {
-          return const Center(child: Text('No treatment history recorded yet.'));
-        }
-        return ListView.separated(
-          padding: const EdgeInsets.all(16),
-          itemCount: notes.length,
-          separatorBuilder: (context, index) => const SizedBox(height: 8),
-          itemBuilder: (context, index) {
-            final note = notes[index];
-            return Card(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-                side: BorderSide(color: note.category.color.withValues(alpha: 0.4)),
-              ),
-              child: ListTile(
-                onTap: () async {
-                  await Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (context) => ToothDetailScreen(
-                        repository: widget.repository,
-                        syncService: widget.syncService,
-                        patientId: widget.patient.id!,
-                        toothNumber: note.toothNumber,
-                      ),
-                    ),
-                  );
-                  _reload();
-                },
-                leading: CircleAvatar(
-                  backgroundColor: note.category.color.withValues(alpha: 0.15),
-                  child: Text(
-                    '${note.toothNumber}',
-                    style: TextStyle(color: note.category.color, fontWeight: FontWeight.bold),
-                  ),
-                ),
-                title: Text(note.text, maxLines: 3, overflow: TextOverflow.ellipsis),
-                subtitle: Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Row(
-                    children: [
-                      _CategoryChip(category: note.category),
-                      const SizedBox(width: 8),
-                      Text(_formatDate(note.updatedAt), style: Theme.of(context).textTheme.bodySmall),
-                    ],
-                  ),
+    return Scaffold(
+      body: FutureBuilder<List<ToothNote>>(
+        future: _notesFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final notes = snapshot.data ?? const [];
+          if (notes.isEmpty) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Text(
+                  'No treatment history recorded yet.\n'
+                  'Tap "Add entry" to record a visit, or add notes from a tooth on the chart.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                 ),
               ),
             );
-          },
-        );
-      },
+          }
+          return ListView.separated(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 88),
+            itemCount: notes.length,
+            separatorBuilder: (context, index) => const SizedBox(height: 8),
+            itemBuilder: (context, index) {
+              final note = notes[index];
+              return Card(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  side: BorderSide(color: note.category.color.withValues(alpha: 0.4)),
+                ),
+                child: ListTile(
+                  onTap: () =>
+                      note.isGeneral ? _editEntry(note) : _openTooth(note.toothNumber),
+                  leading: CircleAvatar(
+                    backgroundColor: note.category.color.withValues(alpha: 0.15),
+                    child: note.isGeneral
+                        ? Icon(
+                            Icons.medical_services_outlined,
+                            size: 18,
+                            color: note.category.color,
+                          )
+                        : Text(
+                            '${note.toothNumber}',
+                            style: TextStyle(
+                              color: note.category.color,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                  ),
+                  title: Text(note.text, maxLines: 3, overflow: TextOverflow.ellipsis),
+                  subtitle: Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Row(
+                      children: [
+                        _CategoryChip(category: note.category),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _formatDate(note.createdAt),
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  trailing: PopupMenuButton<String>(
+                    tooltip: 'Entry options',
+                    onSelected: (value) {
+                      switch (value) {
+                        case 'edit':
+                          _editEntry(note);
+                        case 'tooth':
+                          _openTooth(note.toothNumber);
+                        case 'delete':
+                          _deleteEntry(note);
+                      }
+                    },
+                    itemBuilder: (context) => [
+                      const PopupMenuItem(value: 'edit', child: Text('Edit entry')),
+                      if (!note.isGeneral)
+                        PopupMenuItem(
+                          value: 'tooth',
+                          child: Text('Open tooth ${note.toothNumber}'),
+                        ),
+                      const PopupMenuItem(value: 'delete', child: Text('Delete entry')),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _addEntry,
+        icon: const Icon(Icons.add),
+        label: const Text('Add entry'),
+      ),
+    );
+  }
+}
+
+class _TimelineEntryResult {
+  const _TimelineEntryResult({
+    required this.toothNumber,
+    required this.category,
+    required this.text,
+    required this.date,
+  });
+
+  final int toothNumber;
+  final NoteCategory category;
+  final String text;
+  final DateTime date;
+}
+
+/// Add/edit form for one timeline entry. The date is editable because
+/// treatment often gets written up after the fact, and a timeline that
+/// always says "today" is no timeline at all.
+class _TimelineEntryDialog extends StatefulWidget {
+  const _TimelineEntryDialog({this.existing});
+
+  final ToothNote? existing;
+
+  @override
+  State<_TimelineEntryDialog> createState() => _TimelineEntryDialogState();
+}
+
+class _TimelineEntryDialogState extends State<_TimelineEntryDialog> {
+  late int _toothNumber;
+  late NoteCategory _category;
+  late DateTime _date;
+  late final TextEditingController _textController;
+
+  @override
+  void initState() {
+    super.initState();
+    final existing = widget.existing;
+    _toothNumber = existing?.toothNumber ?? kGeneralToothNumber;
+    _category = existing?.category ?? NoteCategory.consultation;
+    _date = existing?.createdAt ?? DateTime.now();
+    _textController = TextEditingController(text: existing?.text ?? '');
+    _textController.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    _textController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: DateTime(DateTime.now().year - 20),
+      lastDate: DateTime.now(),
+    );
+    if (picked != null) {
+      setState(() => _date = DateTime(picked.year, picked.month, picked.day, 12));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dialogWidth = kDialogContentWidth(context);
+    const chipSpacing = 8.0;
+    final chipColumns = dialogWidth >= 380 ? 3 : 2;
+    final chipWidth = (dialogWidth - chipSpacing * (chipColumns - 1)) / chipColumns;
+
+    return AlertDialog(
+      title: Text(widget.existing == null ? 'Add timeline entry' : 'Edit entry'),
+      content: SingleChildScrollView(
+        child: SizedBox(
+          width: dialogWidth,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              DropdownButtonFormField<int>(
+                initialValue: _toothNumber,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Applies to',
+                  border: OutlineInputBorder(),
+                ),
+                items: [
+                  const DropdownMenuItem(
+                    value: kGeneralToothNumber,
+                    child: Text('General (no specific tooth)'),
+                  ),
+                  for (var number = 1; number <= 32; number++)
+                    DropdownMenuItem(value: number, child: Text('Tooth $number')),
+                ],
+                onChanged: (value) =>
+                    setState(() => _toothNumber = value ?? _toothNumber),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _pickDate,
+                  icon: const Icon(Icons.calendar_today, size: 16),
+                  label: Text('Date: ${_formatDate(_date)}'),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text('Category', style: theme.textTheme.labelLarge),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: chipSpacing,
+                runSpacing: chipSpacing,
+                children: [
+                  for (final category in NoteCategory.values)
+                    SizedBox(
+                      width: chipWidth,
+                      child: ChoiceChip(
+                        label: Center(
+                          child: Text(
+                            category.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        labelPadding: const EdgeInsets.symmetric(horizontal: 2),
+                        selected: _category == category,
+                        showCheckmark: false,
+                        selectedColor: category.color.withValues(alpha: 0.35),
+                        side: BorderSide(
+                          color: category.color.withValues(
+                            alpha: _category == category ? 0.9 : 0.4,
+                          ),
+                        ),
+                        onSelected: (_) => setState(() => _category = category),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _textController,
+                autofocus: widget.existing == null,
+                minLines: 4,
+                maxLines: 10,
+                decoration: const InputDecoration(
+                  labelText: 'What was done',
+                  hintText: 'Describe the treatment, findings or advice given...',
+                  border: OutlineInputBorder(),
+                  alignLabelWithHint: true,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _textController.text.trim().isEmpty
+              ? null
+              : () => Navigator.of(context).pop(
+                  _TimelineEntryResult(
+                    toothNumber: _toothNumber,
+                    category: _category,
+                    text: _textController.text.trim(),
+                    date: _date,
+                  ),
+                ),
+          child: const Text('Save'),
+        ),
+      ],
     );
   }
 }
@@ -423,46 +791,21 @@ class _FamilyTabState extends State<_FamilyTab> {
   }
 
   Future<void> _addRelationship() async {
-    final allPatients = await widget.repository.getPatients();
     final existing = await widget.repository.getRelationships(widget.patient.id!);
-    final linkedIds = existing.map((r) => r.relatedPatient.id).toSet();
-    final candidates = allPatients
-        .where((p) => p.id != widget.patient.id && !linkedIds.contains(p.id))
-        .toList();
-
-    if (candidates.isEmpty) {
-      if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('No patients to link'),
-          content: const Text(
-            'Every other patient is already linked, or there are no other patients yet.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
-
     if (!mounted) return;
-    final relatedPatient = await showDialog<Patient>(
-      context: context,
-      builder: (context) => SimpleDialog(
-        title: const Text('Link which patient?'),
-        children: [
-          for (final candidate in candidates)
-            SimpleDialogOption(
-              onPressed: () => Navigator.of(context).pop(candidate),
-              child: Text(candidate.fullName),
-            ),
-        ],
-      ),
+
+    // Searched rather than listed, and able to create the relative on the
+    // spot - the family member being linked is often a new patient too.
+    final relatedPatient = await showPatientPicker(
+      context,
+      repository: widget.repository,
+      syncService: widget.syncService,
+      title: 'Link which patient?',
+      excludeIds: {
+        widget.patient.id!,
+        for (final relationship in existing)
+          if (relationship.relatedPatient.id != null) relationship.relatedPatient.id!,
+      },
     );
     if (relatedPatient == null || !mounted) return;
 

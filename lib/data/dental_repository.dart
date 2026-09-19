@@ -57,6 +57,40 @@ class DentalRepository {
     ];
   }
 
+  /// Name search for the patient pickers. A practice can have thousands of
+  /// patients, so the filtering and the cap both happen in SQL rather than by
+  /// loading every row into memory first.
+  Future<List<Patient>> searchPatients(String query, {int limit = 50}) async {
+    final db = await _database.database;
+    final trimmed = query.trim();
+    final rows = trimmed.isEmpty
+        ? await db.query(
+            'patients',
+            orderBy: 'last_name, first_name',
+            limit: limit,
+          )
+        : await db.rawQuery(
+            '''
+            SELECT * FROM patients
+            WHERE first_name LIKE ?
+               OR last_name LIKE ?
+               OR (first_name || ' ' || last_name) LIKE ?
+            ORDER BY last_name, first_name
+            LIMIT ?
+            ''',
+            ['%$trimmed%', '%$trimmed%', '%$trimmed%', limit],
+          );
+    return rows.map(Patient.fromMap).toList();
+  }
+
+  /// How many patients exist in total, so a capped search result can say what
+  /// it is a subset of.
+  Future<int> countPatients() async {
+    final db = await _database.database;
+    final rows = await db.rawQuery('SELECT COUNT(*) AS count FROM patients');
+    return (rows.first['count'] as int?) ?? 0;
+  }
+
   Future<Patient> addPatient(String firstName, String lastName) async {
     final db = await _database.database;
     final patient = Patient(
@@ -202,11 +236,14 @@ class DentalRepository {
     return rows.map(ToothNote.fromMap).toList();
   }
 
+  /// [createdAt] is what the treatment timeline sorts and dates entries by,
+  /// so it can be backdated when a past treatment is recorded after the fact.
   Future<ToothNote> addNote(
     int patientId,
     int toothNumber,
     String text, {
     NoteCategory category = NoteCategory.other,
+    DateTime? createdAt,
   }) async {
     final db = await _database.database;
     final now = DateTime.now();
@@ -215,7 +252,7 @@ class DentalRepository {
       toothNumber: toothNumber,
       text: text.trim(),
       category: category,
-      createdAt: now,
+      createdAt: createdAt ?? now,
       updatedAt: now,
     );
     final id = await db.insert('tooth_notes', note.toMap());
@@ -226,6 +263,7 @@ class DentalRepository {
     ToothNote note,
     String newText, {
     NoteCategory? category,
+    DateTime? createdAt,
   }) async {
     final db = await _database.database;
     // Snapshot the pre-edit state so it can be viewed or reverted to later.
@@ -238,6 +276,7 @@ class DentalRepository {
     final updated = note.copyWith(
       text: newText.trim(),
       category: category,
+      createdAt: createdAt,
       updatedAt: DateTime.now(),
     );
     await db.update(
@@ -264,6 +303,20 @@ class DentalRepository {
   /// history too - reverting is never a dead end, you can always go back.
   Future<void> revertNoteToHistoryEntry(ToothNote note, ToothNoteHistoryEntry entry) async {
     await updateNote(note, entry.text, category: entry.category);
+  }
+
+  /// Moves a note to another tooth (or to [kGeneralToothNumber] for an entry
+  /// that isn't about one tooth). Separate from [updateNote] because it
+  /// changes where the note lives rather than what it says, so it isn't a
+  /// text edit worth snapshotting into history.
+  Future<void> moveNoteToTooth(int noteId, int toothNumber) async {
+    final db = await _database.database;
+    await db.update(
+      'tooth_notes',
+      {'tooth_number': toothNumber},
+      where: 'id = ?',
+      whereArgs: [noteId],
+    );
   }
 
   Future<void> deleteNote(int noteId) async {
