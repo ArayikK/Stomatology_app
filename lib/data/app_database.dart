@@ -13,10 +13,12 @@ class AppDatabase {
   }
   static final AppDatabase instance = AppDatabase._();
 
-  /// Bumped to 2 when note history, family links and appointments were added.
+  /// Bumped to 3 when x-ray calibration, per-image view settings and CBCT
+  /// slice series were added (2 was note history, family links and
+  /// appointments).
   /// Early builds shipped those tables under version 1, so the version number
   /// alone can't be trusted - [ensureSchema] repairs whatever is missing.
-  static const int _schemaVersion = 2;
+  static const int _schemaVersion = 3;
 
   Database? _db;
 
@@ -113,6 +115,10 @@ class AppDatabase {
         role TEXT,
         paired_image_id INTEGER,
         annotations_json TEXT,
+        pixel_spacing_mm REAL,
+        view_settings_json TEXT,
+        series_dir TEXT,
+        slice_count INTEGER,
         created_at TEXT NOT NULL,
         FOREIGN KEY (patient_id) REFERENCES patients (id) ON DELETE CASCADE
       )
@@ -156,6 +162,10 @@ class AppDatabase {
     await _addColumnIfMissing(db, 'tooth_images', 'role', 'TEXT');
     await _addColumnIfMissing(db, 'tooth_images', 'paired_image_id', 'INTEGER');
     await _addColumnIfMissing(db, 'tooth_images', 'annotations_json', 'TEXT');
+    await _addColumnIfMissing(db, 'tooth_images', 'pixel_spacing_mm', 'REAL');
+    await _addColumnIfMissing(db, 'tooth_images', 'view_settings_json', 'TEXT');
+    await _addColumnIfMissing(db, 'tooth_images', 'series_dir', 'TEXT');
+    await _addColumnIfMissing(db, 'tooth_images', 'slice_count', 'INTEGER');
 
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_notes_patient_tooth ON tooth_notes (patient_id, tooth_number)',

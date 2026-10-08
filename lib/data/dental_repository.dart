@@ -1,5 +1,6 @@
 import '../models/annotation_shape.dart';
 import '../models/appointment.dart';
+import '../models/image_view_settings.dart';
 import '../models/note_category.dart';
 import '../models/patient.dart';
 import '../models/patient_relationship.dart';
@@ -340,6 +341,9 @@ class DentalRepository {
     int toothNumber,
     String filePath, {
     String? originalDicomPath,
+    double? pixelSpacingMm,
+    String? seriesDir,
+    int? sliceCount,
   }) async {
     final db = await _database.database;
     final image = ToothImage(
@@ -347,6 +351,9 @@ class DentalRepository {
       toothNumber: toothNumber,
       filePath: filePath,
       originalDicomPath: originalDicomPath,
+      pixelSpacingMm: pixelSpacingMm,
+      seriesDir: seriesDir,
+      sliceCount: sliceCount,
       createdAt: DateTime.now(),
     );
     final id = await db.insert('tooth_images', image.toMap());
@@ -356,6 +363,9 @@ class DentalRepository {
       toothNumber: toothNumber,
       filePath: filePath,
       originalDicomPath: originalDicomPath,
+      pixelSpacingMm: pixelSpacingMm,
+      seriesDir: seriesDir,
+      sliceCount: sliceCount,
       createdAt: image.createdAt,
     );
   }
@@ -419,6 +429,63 @@ class DentalRepository {
       where: 'id = ?',
       whereArgs: [imageId],
     );
+  }
+
+  /// Millimetres per pixel for one image: read from the DICOM on import, or
+  /// set by hand when the dentist calibrates a photo against a known length.
+  Future<void> updateImageCalibration(int imageId, double? mmPerPixel) async {
+    final db = await _database.database;
+    await db.update(
+      'tooth_images',
+      {'pixel_spacing_mm': mmPerPixel},
+      where: 'id = ?',
+      whereArgs: [imageId],
+    );
+  }
+
+  /// Remembers the brightness/contrast/inversion chosen for one image.
+  Future<void> updateImageViewSettings(int imageId, ImageViewSettings settings) async {
+    final db = await _database.database;
+    await db.update(
+      'tooth_images',
+      {'view_settings_json': settings.isDefault ? null : settings.encode()},
+      where: 'id = ?',
+      whereArgs: [imageId],
+    );
+  }
+
+  /// Every image of one patient, newest first - the x-ray timeline.
+  Future<List<ToothImage>> getPatientImages(int patientId) async {
+    final db = await _database.database;
+    final rows = await db.query(
+      'tooth_images',
+      where: 'patient_id = ?',
+      whereArgs: [patientId],
+      orderBy: 'created_at DESC',
+    );
+    return rows.map(ToothImage.fromMap).toList();
+  }
+
+  Future<Patient?> getPatient(int patientId) async {
+    final db = await _database.database;
+    final rows = await db.query(
+      'patients',
+      where: 'id = ?',
+      whereArgs: [patientId],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : Patient.fromMap(rows.first);
+  }
+
+  Future<ToothImage?> getImage(int imageId) async {
+    final db = await _database.database;
+    final rows = await db.query(
+      'tooth_images',
+      where: 'id = ?',
+      whereArgs: [imageId],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : ToothImage.fromMap(rows.first);
   }
 
   Future<List<Appointment>> getAllAppointments() async {

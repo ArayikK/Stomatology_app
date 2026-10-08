@@ -97,6 +97,11 @@ void main() {
         'role',
         'paired_image_id',
         'annotations_json',
+        // Added with the measuring/CBCT features.
+        'pixel_spacing_mm',
+        'view_settings_json',
+        'series_dir',
+        'slice_count',
       ]),
     );
 

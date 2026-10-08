@@ -1,0 +1,6 @@
+The Noto Sans and Noto Sans Armenian fonts in this folder are (c) The Noto
+Project Authors (https://github.com/notofonts) and are licensed under the
+SIL Open Font License, Version 1.1 - https://scripts.sil.org/OFL
+
+They are bundled so PDF reports can print Armenian, Cyrillic and Latin
+patient names offline. The PDF library's built-in Helvetica cannot.

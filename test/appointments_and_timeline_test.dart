@@ -76,7 +76,12 @@ void main() {
       '09:00', '09:30', '10:00', '17:00', // time slots
       'Today', 'Tomorrow', 'Next week', // quick days
     ]) {
-      final finder = find.text(label);
+      // Scoped to the dialog: the agenda behind it has its own "Today"
+      // heading, which would otherwise match too.
+      final finder = find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text(label),
+      );
       expect(finder, findsOneWidget, reason: '$label should be on screen');
       final chip = find.ancestor(of: finder, matching: find.byType(ChoiceChip));
       expect(

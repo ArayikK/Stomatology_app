@@ -28,6 +28,8 @@ class DicomPixelInfo {
     this.windowWidth,
     this.rescaleIntercept = 0,
     this.rescaleSlope = 1,
+    this.pixelSpacingMm,
+    this.instanceNumber,
   });
 
   final int rows;
@@ -41,6 +43,16 @@ class DicomPixelInfo {
   final double? windowWidth;
   final double rescaleIntercept;
   final double rescaleSlope;
+
+  /// Millimetres per pixel, from Pixel Spacing (0028,0030) or, failing that,
+  /// Imager Pixel Spacing (0018,1164). Null when the file doesn't say - then
+  /// distances can only be measured in pixels until the user calibrates.
+  /// Pixels are assumed square, which dental sensors and CBCT exports are.
+  final double? pixelSpacingMm;
+
+  /// Instance Number (0020,0013): the slice's position within its series,
+  /// used to order the slices of a CBCT volume.
+  final int? instanceNumber;
 }
 
 class DicomDataset {
@@ -73,6 +85,9 @@ const int _kTagWindowCenter = (0x0028 << 16) | 0x1050;
 const int _kTagWindowWidth = (0x0028 << 16) | 0x1051;
 const int _kTagRescaleIntercept = (0x0028 << 16) | 0x1052;
 const int _kTagRescaleSlope = (0x0028 << 16) | 0x1053;
+const int _kTagPixelSpacing = (0x0028 << 16) | 0x0030;
+const int _kTagImagerPixelSpacing = (0x0018 << 16) | 0x1164;
+const int _kTagInstanceNumber = (0x0020 << 16) | 0x0013;
 const int _kTagFileMetaGroupLength = (0x0002 << 16) | 0x0000;
 const int _kTagTransferSyntaxUid = (0x0002 << 16) | 0x0010;
 
@@ -157,6 +172,9 @@ class DicomParser {
     double? windowWidth;
     double rescaleIntercept = 0;
     double rescaleSlope = 1;
+    double? pixelSpacingMm;
+    double? imagerPixelSpacingMm;
+    int? instanceNumber;
     Uint8List? pixelBytes;
 
     while (!cursor.atEnd) {
@@ -221,6 +239,12 @@ class DicomParser {
           rescaleIntercept = _readFirstNumericString(cursor, length) ?? 0;
         case _kTagRescaleSlope:
           rescaleSlope = _readFirstNumericString(cursor, length) ?? 1;
+        case _kTagPixelSpacing:
+          pixelSpacingMm = _readFirstNumericString(cursor, length);
+        case _kTagImagerPixelSpacing:
+          imagerPixelSpacingMm = _readFirstNumericString(cursor, length);
+        case _kTagInstanceNumber:
+          instanceNumber = _readFirstNumericString(cursor, length)?.round();
         default:
           cursor.readBytes(length);
       }
@@ -249,6 +273,8 @@ class DicomParser {
         windowWidth: windowWidth,
         rescaleIntercept: rescaleIntercept,
         rescaleSlope: rescaleSlope,
+        pixelSpacingMm: _validSpacing(pixelSpacingMm) ?? _validSpacing(imagerPixelSpacingMm),
+        instanceNumber: instanceNumber,
       ),
       pixelBytes: pixelBytes,
       compression: compression,
@@ -370,6 +396,14 @@ class DicomParser {
     final first = s.split('\\').first.trim();
     return double.tryParse(first);
   }
+}
+
+/// Guards against the nonsense values some exporters write (0, negative, or
+/// an absurd spacing): a bad number would make every measurement wrong, and
+/// falling back to "unknown" at least lets the user calibrate by hand.
+double? _validSpacing(double? mm) {
+  if (mm == null || !mm.isFinite || mm <= 0 || mm > 10) return null;
+  return mm;
 }
 
 DicomCompression? _compressionForTransferSyntax(String uid) {

@@ -1233,20 +1233,31 @@ class _AppointmentFormDialogState extends State<_AppointmentFormDialog> {
               const SizedBox(height: 16),
               DropdownButtonFormField<int>(
                 initialValue: _duration,
+                isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Duration'),
                 items: [
                   for (final minutes in _kDurations)
-                    DropdownMenuItem(value: minutes, child: Text('$minutes minutes')),
+                    DropdownMenuItem(
+                      value: minutes,
+                      child: Text('$minutes minutes', overflow: TextOverflow.ellipsis),
+                    ),
                 ],
                 onChanged: (value) => setState(() => _duration = value ?? _duration),
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<int?>(
                 initialValue: _reminderMinutesBefore,
+                // isExpanded: the longest reminder label is a hair wider than
+                // the field on a narrow phone, and without this the row
+                // overflows instead of the label shortening.
+                isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Reminder'),
                 items: [
                   for (final entry in _kReminderOptions.entries)
-                    DropdownMenuItem(value: entry.value, child: Text(entry.key)),
+                    DropdownMenuItem(
+                      value: entry.value,
+                      child: Text(entry.key, overflow: TextOverflow.ellipsis),
+                    ),
                 ],
                 onChanged: (value) => setState(() => _reminderMinutesBefore = value),
               ),

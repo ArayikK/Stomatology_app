@@ -1,23 +1,23 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
+import 'package:printing/printing.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 import '../data/backend_sync_service.dart';
 import '../data/dental_repository.dart';
-import '../dicom/dicom_image_converter.dart';
-import '../dicom/dicom_parser.dart';
 import '../models/annotation_shape.dart';
+import '../models/image_view_settings.dart';
 import '../models/note_category.dart';
+import '../models/patient.dart';
 import '../models/tooth_image.dart';
 import '../models/tooth_note.dart';
+import '../reports/xray_report.dart';
 import 'dialog_metrics.dart';
-import 'image_annotation_screen.dart';
+import 'image_compare_screen.dart';
+import 'image_viewer_screen.dart';
+import 'xray_import_flow.dart';
 import '../tour/app_tour.dart';
 import '../tour/spotlight_tour.dart';
 
@@ -45,6 +45,7 @@ class ToothDetailScreen extends StatefulWidget {
 class _ToothDetailScreenState extends State<ToothDetailScreen> {
   List<ToothNote> _notes = [];
   List<ToothImage> _images = [];
+  Patient? _patient;
   bool _loading = true;
   bool _busy = false;
 
@@ -101,12 +102,21 @@ class _ToothDetailScreenState extends State<ToothDetailScreen> {
   Future<void> _load() async {
     final notes = await widget.repository.getNotes(widget.patientId, widget.toothNumber);
     final images = await widget.repository.getImages(widget.patientId, widget.toothNumber);
+    final patient = await widget.repository.getPatient(widget.patientId);
     if (!mounted) return;
     setState(() {
       _notes = notes;
       _images = images;
+      _patient = patient;
       _loading = false;
     });
+  }
+
+  /// Oldest first: the x-ray strip reads as a timeline of this tooth.
+  List<ToothImage> get _imagesOldestFirst {
+    final sorted = List<ToothImage>.of(_images)
+      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return sorted;
   }
 
   Future<void> _showNoteEditor({ToothNote? existing}) async {
@@ -356,255 +366,87 @@ class _ToothDetailScreenState extends State<ToothDetailScreen> {
     }
   }
 
-  Future<void> _pickImage(ImageSource source) async {
-    final picked = await ImagePicker().pickImage(source: source, imageQuality: 85);
-    if (picked == null) return;
+  /// Adding an image goes through the shared flow, so this screen and the
+  /// patient's x-ray tab always offer the same sources and behave the same.
+  Future<void> _addImage() async {
+    final source = await showXraySourceSheet(context);
+    if (source == null || !mounted) return;
     setState(() => _busy = true);
-    final docsDir = await getApplicationDocumentsDirectory();
-    final xraysDir = Directory(p.join(docsDir.path, 'xrays'));
-    if (!await xraysDir.exists()) {
-      await xraysDir.create(recursive: true);
-    }
-    final ext = p.extension(picked.path);
-    final fileName =
-        'p${widget.patientId}_t${widget.toothNumber}_${DateTime.now().millisecondsSinceEpoch}$ext';
-    final savedPath = p.join(xraysDir.path, fileName);
-    await File(picked.path).copy(savedPath);
-    await widget.repository.addImage(widget.patientId, widget.toothNumber, savedPath);
-    await _load();
+    final added = await runXrayImport(
+      context: context,
+      repository: widget.repository,
+      syncService: widget.syncService,
+      patientId: widget.patientId,
+      toothNumber: widget.toothNumber,
+      source: source,
+    );
+    if (added) await _load();
     if (mounted) setState(() => _busy = false);
-    unawaited(widget.syncService.pushAll());
   }
 
-  Future<void> _pickDicomFile() async {
-    final result = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['dcm'],
-      withData: true,
+  Future<void> _viewImage(ToothImage image) async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (context) => ImageViewerScreen(
+          repository: widget.repository,
+          syncService: widget.syncService,
+          image: image,
+          siblings: _images,
+          patient: _patient,
+          notes: _notes,
+        ),
+      ),
     );
-    final picked = result?.files.single;
-    if (picked == null) return; // user cancelled the picker
+    if (changed == true) await _load();
+  }
 
-    if (picked.bytes == null) {
-      await _showDicomError('Could not read the selected file.');
-      return;
-    }
+  Future<void> _comparePair((ToothImage, ToothImage) pair) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => ImageCompareScreen(left: pair.$1, right: pair.$2),
+      ),
+    );
+  }
 
+  /// One PDF for this tooth: every image with its markings burned in, plus
+  /// the written history. What gets handed to the patient, sent to a
+  /// colleague, or filed with an insurer.
+  Future<void> _sharePdfReport() async {
+    final patient = _patient;
+    if (patient == null) return;
     setState(() => _busy = true);
     try {
-      final dataset = const DicomParser().parse(picked.bytes!);
-      final rendered = await const DicomImageConverter().convert(dataset);
-
-      final docsDir = await getApplicationDocumentsDirectory();
-      final xraysDir = Directory(p.join(docsDir.path, 'xrays'));
-      if (!await xraysDir.exists()) {
-        await xraysDir.create(recursive: true);
+      final reportImages = <ReportImage>[];
+      for (final image in _imagesOldestFirst) {
+        final png = await renderAnnotatedPng(
+          file: File(image.filePath),
+          shapes: decodeAnnotations(image.annotationsJson),
+          settings: ImageViewSettings.decode(image.viewSettingsJson),
+          mmPerPixel: image.pixelSpacingMm,
+        );
+        if (png != null) {
+          reportImages.add(ReportImage(png: png, caption: describeReportImage(image)));
+        }
       }
-      final stamp = DateTime.now().millisecondsSinceEpoch;
-      final baseName = 'p${widget.patientId}_t${widget.toothNumber}_$stamp';
-      final displayPath = p.join(xraysDir.path, '$baseName.${rendered.extension}');
-      final originalPath = p.join(xraysDir.path, '$baseName.dcm');
-      await File(displayPath).writeAsBytes(rendered.bytes);
-      await File(originalPath).writeAsBytes(picked.bytes!);
-
-      await widget.repository.addImage(
-        widget.patientId,
-        widget.toothNumber,
-        displayPath,
-        originalDicomPath: originalPath,
+      final pdf = await buildToothReportPdf(
+        patient: patient,
+        toothNumber: widget.toothNumber,
+        images: reportImages,
+        notes: _notes,
       );
-      await _load();
-      unawaited(widget.syncService.pushAll());
-    } on DicomParseException catch (e) {
-      await _showDicomError(e.message);
+      await Printing.sharePdf(
+        bytes: pdf,
+        filename: 'tooth-${widget.toothNumber}-${patient.lastName.toLowerCase()}.pdf',
+      );
     } catch (e) {
-      await _showDicomError('Could not import this DICOM file: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not build the report: $e')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
-  }
-
-  Future<void> _showDicomError(String message) async {
-    if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Couldn\'t import this file'),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _viewImage(ToothImage image) {
-    showDialog<void>(
-      context: context,
-      builder: (context) {
-        return Dialog(
-          insetPadding: const EdgeInsets.all(12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Expanded(
-                child: Stack(
-                  children: [
-                    InteractiveViewer(
-                      child: Image.file(File(image.filePath), fit: BoxFit.contain),
-                    ),
-                    if (image.originalDicomPath != null)
-                      Positioned(
-                        left: 4,
-                        top: 4,
-                        child: _Badge(text: 'Imported from DICOM'),
-                      ),
-                    if (image.role != null)
-                      Positioned(
-                        left: 4,
-                        bottom: 4,
-                        child: _Badge(
-                          text: image.role == ImageRole.before ? 'BEFORE' : 'AFTER',
-                        ),
-                      ),
-                    Positioned(
-                      top: 4,
-                      right: 4,
-                      child: IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              OverflowBar(
-                alignment: MainAxisAlignment.center,
-                children: [
-                  TextButton.icon(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      _annotateImage(image);
-                    },
-                    icon: const Icon(Icons.draw_outlined),
-                    label: Text(image.hasAnnotations ? 'Edit annotations' : 'Annotate'),
-                  ),
-                  if (image.isPaired)
-                    TextButton.icon(
-                      onPressed: () async {
-                        Navigator.of(context).pop();
-                        await widget.repository.unpairImage(image.id!);
-                        await _load();
-                        unawaited(widget.syncService.pushAll());
-                      },
-                      icon: const Icon(Icons.link_off),
-                      label: const Text('Unpair'),
-                    )
-                  else
-                    TextButton.icon(
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                        _pairImageFlow(image);
-                      },
-                      icon: const Icon(Icons.compare),
-                      label: const Text('Pair as before/after'),
-                    ),
-                  TextButton.icon(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                      _deleteImage(image);
-                    },
-                    icon: const Icon(Icons.delete_outline),
-                    label: const Text('Delete'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Future<void> _pairImageFlow(ToothImage image) async {
-    final candidates = _images.where((i) => i.id != image.id && !i.isPaired).toList();
-    if (candidates.isEmpty) {
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Nothing to pair with'),
-          content: const Text(
-            'Add another x-ray/photo for this tooth first, then you can link the two '
-            'as a before/after comparison.',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
-
-    final partner = await showDialog<ToothImage>(
-      context: context,
-      builder: (context) => SimpleDialog(
-        title: const Text('Pair with which image?'),
-        children: [
-          for (final candidate in candidates)
-            SimpleDialogOption(
-              onPressed: () => Navigator.of(context).pop(candidate),
-              child: Row(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: Image.file(
-                      File(candidate.filePath),
-                      width: 48,
-                      height: 48,
-                      fit: BoxFit.cover,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Text(_formatDate(candidate.createdAt)),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-    if (partner == null || !mounted) return;
-
-    final role = await showDialog<ImageRole>(
-      context: context,
-      builder: (context) => SimpleDialog(
-        title: const Text('Which one is "before"?'),
-        children: [
-          SimpleDialogOption(
-            onPressed: () => Navigator.of(context).pop(ImageRole.before),
-            child: const Text('This image is the "before"'),
-          ),
-          SimpleDialogOption(
-            onPressed: () => Navigator.of(context).pop(ImageRole.after),
-            child: const Text('This image is the "after"'),
-          ),
-        ],
-      ),
-    );
-    if (role == null) return;
-
-    if (role == ImageRole.before) {
-      await widget.repository.pairImages(beforeImageId: image.id!, afterImageId: partner.id!);
-    } else {
-      await widget.repository.pairImages(beforeImageId: partner.id!, afterImageId: image.id!);
-    }
-    await _load();
-    unawaited(widget.syncService.pushAll());
   }
 
   Future<void> _deleteImage(ToothImage image) async {
@@ -614,25 +456,19 @@ class _ToothDetailScreenState extends State<ToothDetailScreen> {
     unawaited(widget.syncService.pushAll());
   }
 
-  Future<void> _annotateImage(ToothImage image) async {
-    final shapes = await Navigator.of(context).push<List<AnnotationShape>>(
-      MaterialPageRoute(
-        builder: (context) => ImageAnnotationScreen(
-          imageFile: File(image.filePath),
-          initialShapes: decodeAnnotations(image.annotationsJson),
-        ),
-      ),
-    );
-    if (shapes == null || image.id == null) return;
-    await widget.repository.updateImageAnnotations(image.id!, shapes);
-    await _load();
-    unawaited(widget.syncService.pushAll());
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Tooth ${widget.toothNumber}')),
+      appBar: AppBar(
+        title: Text('Tooth ${widget.toothNumber}'),
+        actions: [
+          IconButton(
+            tooltip: 'Share as PDF',
+            icon: const Icon(Icons.picture_as_pdf_outlined),
+            onPressed: _busy || _patient == null ? null : _sharePdfReport,
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         key: _addNoteKey,
         onPressed: () => _showNoteEditor(),
@@ -648,58 +484,57 @@ class _ToothDetailScreenState extends State<ToothDetailScreen> {
                 const SizedBox(height: 8),
                 SizedBox(
                   key: _xraysKey,
-                  height: 96,
+                  height: 124,
                   child: ListView(
                     scrollDirection: Axis.horizontal,
                     children: [
-                      for (final image in _images)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: GestureDetector(
-                            onTap: () => _viewImage(image),
-                            onLongPress: () => _deleteImage(image),
-                            child: Stack(
-                              children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: Image.file(
-                                    File(image.filePath),
-                                    width: 96,
-                                    height: 96,
-                                    fit: BoxFit.cover,
+                      for (final image in _imagesOldestFirst)
+                        _XrayStripItem(
+                          caption: _formatShortDate(image.createdAt),
+                          onTap: () => _viewImage(image),
+                          onLongPress: () => _deleteImage(image),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Image.file(File(image.filePath), fit: BoxFit.cover),
+                              if (image.originalDicomPath != null && !image.isSeries)
+                                const Positioned(
+                                  left: 4,
+                                  bottom: 4,
+                                  child: _Badge(text: 'DICOM', small: true),
+                                ),
+                              if (image.isSeries)
+                                Positioned(
+                                  left: 4,
+                                  bottom: 4,
+                                  child: _Badge(
+                                    text: '${image.sliceCount} sl.',
+                                    small: true,
                                   ),
                                 ),
-                                if (image.originalDicomPath != null)
-                                  const Positioned(
-                                    left: 4,
-                                    bottom: 4,
-                                    child: _Badge(text: 'DICOM', small: true),
+                              if (image.role != null)
+                                Positioned(
+                                  right: 4,
+                                  top: 4,
+                                  child: _Badge(
+                                    text: image.role == ImageRole.before ? 'B' : 'A',
+                                    small: true,
                                   ),
-                                if (image.role != null)
-                                  Positioned(
-                                    right: 4,
-                                    top: 4,
-                                    child: _Badge(
-                                      text: image.role == ImageRole.before ? 'B' : 'A',
-                                      small: true,
-                                    ),
-                                  ),
-                                if (image.hasAnnotations)
-                                  const Positioned(
-                                    right: 4,
-                                    bottom: 4,
-                                    child: Icon(Icons.draw, color: Colors.white, size: 14),
-                                  ),
-                              ],
-                            ),
+                                ),
+                              if (image.hasAnnotations)
+                                const Positioned(
+                                  right: 4,
+                                  bottom: 4,
+                                  child: Icon(Icons.draw, color: Colors.white, size: 14),
+                                ),
+                            ],
                           ),
                         ),
-                      _AddImageButton(
+                      _XrayStripItem(
                         key: _addImageKey,
-                        busy: _busy,
-                        onPickGallery: () => _pickImage(ImageSource.gallery),
-                        onPickCamera: () => _pickImage(ImageSource.camera),
-                        onPickDicom: _pickDicomFile,
+                        caption: 'Add',
+                        onTap: _busy ? null : _addImage,
+                        child: _AddImagePlaceholder(busy: _busy),
                       ),
                     ],
                   ),
@@ -717,9 +552,10 @@ class _ToothDetailScreenState extends State<ToothDetailScreen> {
                       child: Row(
                         children: [
                           Expanded(child: _ComparisonThumb(image: pair.$1, onTap: _viewImage)),
-                          const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 8),
-                            child: Icon(Icons.arrow_forward),
+                          IconButton(
+                            tooltip: 'Compare side by side',
+                            icon: const Icon(Icons.compare_arrows),
+                            onPressed: () => _comparePair(pair),
                           ),
                           Expanded(child: _ComparisonThumb(image: pair.$2, onTap: _viewImage)),
                         ],
@@ -908,78 +744,93 @@ class _ExpandableNoteTextState extends State<_ExpandableNoteText> {
   }
 }
 
-enum _ImageSourceChoice { gallery, camera, dicom }
-
-class _AddImageButton extends StatelessWidget {
-  const _AddImageButton({
+/// One cell of the x-ray strip. Thumbnails and the "add" placeholder are
+/// built from the same tile, so the placeholder is exactly the same square
+/// as a real image instead of a differently shaped box next to them.
+class _XrayStripItem extends StatelessWidget {
+  const _XrayStripItem({
     super.key,
-    required this.busy,
-    required this.onPickGallery,
-    required this.onPickCamera,
-    required this.onPickDicom,
+    required this.child,
+    required this.caption,
+    this.onTap,
+    this.onLongPress,
   });
 
-  final bool busy;
-  final VoidCallback onPickGallery;
-  final VoidCallback onPickCamera;
-  final VoidCallback onPickDicom;
+  static const double tileSize = 96;
+
+  final Widget child;
+  final String caption;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 96,
-      height: 96,
-      child: OutlinedButton(
-        onPressed: busy
-            ? null
-            : () async {
-                final source = await showModalBottomSheet<_ImageSourceChoice>(
-                  context: context,
-                  builder: (context) => SafeArea(
-                    child: Wrap(
-                      children: [
-                        ListTile(
-                          leading: const Icon(Icons.photo_library_outlined),
-                          title: const Text('Choose from gallery'),
-                          onTap: () => Navigator.of(context).pop(_ImageSourceChoice.gallery),
-                        ),
-                        ListTile(
-                          leading: const Icon(Icons.photo_camera_outlined),
-                          title: const Text('Take photo'),
-                          onTap: () => Navigator.of(context).pop(_ImageSourceChoice.camera),
-                        ),
-                        ListTile(
-                          leading: const Icon(Icons.folder_zip_outlined),
-                          title: const Text('Import DICOM (.dcm)'),
-                          subtitle: const Text('X-ray export from a dental sensor/PACS'),
-                          onTap: () => Navigator.of(context).pop(_ImageSourceChoice.dicom),
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-                switch (source) {
-                  case _ImageSourceChoice.gallery:
-                    onPickGallery();
-                  case _ImageSourceChoice.camera:
-                    onPickCamera();
-                  case _ImageSourceChoice.dicom:
-                    onPickDicom();
-                  case null:
-                    break;
-                }
-              },
-        style: OutlinedButton.styleFrom(padding: EdgeInsets.zero),
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        borderRadius: BorderRadius.circular(8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              width: tileSize,
+              height: tileSize,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: child,
+              ),
+            ),
+            const SizedBox(height: 4),
+            SizedBox(
+              width: tileSize,
+              child: Text(
+                caption,
+                style: Theme.of(context).textTheme.bodySmall,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AddImagePlaceholder extends StatelessWidget {
+  const _AddImagePlaceholder({required this.busy});
+
+  final bool busy;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Center(
         child: busy
             ? const SizedBox(
                 width: 20,
                 height: 20,
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
-            : const Icon(Icons.add_a_photo_outlined),
+            : Icon(Icons.add_a_photo_outlined, color: scheme.primary),
       ),
     );
   }
+}
+
+String _formatShortDate(DateTime date) {
+  final local = date.toLocal();
+  String two(int n) => n.toString().padLeft(2, '0');
+  return '${two(local.day)}.${two(local.month)}.${local.year}';
 }
 
 String _formatDate(DateTime date) {

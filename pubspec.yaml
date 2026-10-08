@@ -47,6 +47,9 @@ dependencies:
   flutter_local_notifications: ^22.2.0
   timezone: ^0.11.1
   speech_to_text: ^7.4.0
+  pdf: ^3.13.1
+  printing: ^5.15.1
+  archive: ^4.3.0
 
 dev_dependencies:
   flutter_test:
@@ -79,6 +82,11 @@ flutter:
     # A real DICOM x-ray, imported onto a sample patient on first launch so a
     # fresh install shows what an imported radiograph looks like.
     - assets/sample/sample_xray.dcm
+    # Unicode faces for PDF reports (Armenian/Cyrillic names) - see
+    # assets/fonts/NOTICE.txt for their licence.
+    - assets/fonts/NotoSans-Regular.ttf
+    - assets/fonts/NotoSans-Bold.ttf
+    - assets/fonts/NotoSansArmenian-Regular.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

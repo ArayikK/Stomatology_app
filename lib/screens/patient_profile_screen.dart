@@ -12,6 +12,7 @@ import '../models/tooth_note.dart';
 import 'dialog_metrics.dart';
 import 'patient_chart_screen.dart';
 import 'patient_picker.dart';
+import 'patient_xrays_tab.dart';
 import 'tooth_detail_screen.dart';
 
 /// Patient-level info that doesn't belong to any single tooth: medical
@@ -45,7 +46,7 @@ class _PatientProfileScreenState extends State<PatientProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 3,
+      length: 4,
       child: Scaffold(
         appBar: AppBar(
           title: Text(_patient.fullName),
@@ -54,9 +55,12 @@ class _PatientProfileScreenState extends State<PatientProfileScreen> {
             // label ("Treatment Timeline") fully readable on narrow phones
             // instead of being clipped by its tab.
             labelPadding: EdgeInsets.symmetric(horizontal: 6),
+            isScrollable: true,
+            tabAlignment: TabAlignment.center,
             tabs: [
               _ProfileTab(label: 'Medical History'),
               _ProfileTab(label: 'Treatment Timeline'),
+              _ProfileTab(label: 'X-rays'),
               _ProfileTab(label: 'Family'),
             ],
           ),
@@ -69,6 +73,11 @@ class _PatientProfileScreenState extends State<PatientProfileScreen> {
               onSaved: (updated) => setState(() => _patient = updated),
             ),
             _TreatmentTimelineTab(
+              repository: widget.repository,
+              syncService: widget.syncService,
+              patient: _patient,
+            ),
+            PatientXraysTab(
               repository: widget.repository,
               syncService: widget.syncService,
               patient: _patient,
